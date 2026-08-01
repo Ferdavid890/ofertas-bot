@@ -15,13 +15,11 @@ SPREADSHEET_NAME = "Ebay_App"
 
 def conectar_sheets():
     try:
-        # Intenta leer las credenciales desde la variable de entorno de Render
         creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
         if creds_json:
             creds_dict = json.loads(creds_json)
             creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
         else:
-            # Fallback por si acaso al archivo local
             creds = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", SCOPE)
             
         client = gspread.authorize(creds)
