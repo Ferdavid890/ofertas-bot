@@ -2,7 +2,7 @@ import os
 import base64
 import requests
 from datetime import datetime
-import zoneinfo # Librería estándar de Python para zonas horarias
+import zoneinfo
 from flask import Flask, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
@@ -22,6 +22,7 @@ def conectar_sheets():
         project_id = os.environ.get("GOOGLE_PROJECT_ID")
 
         if not client_email or not private_key or not project_id:
+            print("Faltan variables de entorno de Google Sheets.")
             return None
 
         private_key = private_key.replace("\\n", "\n")
@@ -45,6 +46,7 @@ def obtener_token_ebay():
     client_secret = os.environ.get("EBAY_CLIENT_SECRET")
 
     if not client_id or not client_secret:
+        print("Faltan las variables de entorno de eBay (EBAY_CLIENT_ID o EBAY_CLIENT_SECRET) en Render.")
         return None
 
     credentials = f"{client_id}:{client_secret}"
@@ -57,13 +59,18 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://oauth2.googleapis.com/oauth/api_scope"
+        "scope": "https://api.ebay.com/oauth/api_scope"
     }
 
-    response = requests.post(url, headers=headers, data=body)
-    if response.status_code == 200:
-        return response.json().get("access_token")
-    else:
+    try:
+        response = requests.post(url, headers=headers, data=body)
+        if response.status_code == 200:
+            return response.json().get("access_token")
+        else:
+            print(f"Error HTTP de eBay al autenticar: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        print(f"Excepción conectando a eBay: {e}")
         return None
 
 @app.route("/")
@@ -78,7 +85,7 @@ def ejecutar_freeze_diario():
 
     token = obtener_token_ebay()
     if not token:
-        return jsonify({"status": "error", "message": "No se pudo autenticar con la API de eBay."}), 500
+        return jsonify({"status": "error", "message": "No se pudo autenticar con la API de eBay. Revisa los Logs de Render para ver el detalle técnico."}), 500
 
     try:
         headers = {
@@ -102,6 +109,7 @@ def ejecutar_freeze_diario():
         offset = 0
         limit = 100
         
+        # Paginación para extraer TODOS sin límite de cantidad
         while True:
             search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit={limit}&offset={offset}"
             response = requests.get(search_url, headers=headers)
@@ -139,7 +147,7 @@ def ejecutar_freeze_diario():
                                 item_id, "PSA 10", fecha_registro_actual, title, price, 0.0, hora_cierre_formato, "Pending"
                             ])
                     except Exception:
-                        pass # Si hay error parseando la fecha del ítem, lo ignoramos para evitar que rompa el ciclo
+                        pass 
                 else:
                     # Si no es subasta, va directo a Buy It Now
                     listings_data.append([
