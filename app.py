@@ -40,7 +40,6 @@ def conectar_sheets():
         return None
 
 def obtener_token_ebay():
-    """Genera el token de acceso OAuth para consumir la API de eBay"""
     client_id = os.environ.get("EBAY_CLIENT_ID")
     client_secret = os.environ.get("EBAY_CLIENT_SECRET")
 
@@ -64,7 +63,6 @@ def obtener_token_ebay():
     if response.status_code == 200:
         return response.json().get("access_token")
     else:
-        print(f"Error obteniendo token de eBay: {response.text}")
         return None
 
 @app.route("/")
@@ -79,66 +77,75 @@ def ejecutar_freeze_diario():
 
     token = obtener_token_ebay()
     if not token:
-        return jsonify({"status": "error", "message": "No se pudo autenticar con la API de eBay. Revisa tus credenciales."}), 500
+        return jsonify({"status": "error", "message": "No se pudo autenticar con la API de eBay."}), 500
 
     try:
-        # Llamada a la Browse API de eBay buscando "Lorcana PSA 10"
         headers = {
             "Authorization": f"Bearer {token}",
             "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
         }
-        # Buscamos artículos activos de Lorcana PSA 10
-        search_url = "https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit=50"
         
-        response = requests.get(search_url, headers=headers)
-        if response.status_code != 200:
-            return jsonify({"status": "error", "message": f"Error en la API de eBay: {response.text}"}), 500
-
-        data = response.json()
-        items = data.get("itemSummaries", [])
-
         ws_listings = sheet.worksheet("Listings")
-        ws_listings.clear() # Limpiamos y reescribimos encabezados si es necesario o appendeamos
-        # Aseguramos encabezados por si acaso
+        ws_listings.clear()
         ws_listings.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days"]])
 
         ws_auctions = sheet.worksheet("Auctions")
-        
+        ws_auctions.clear()
+        ws_auctions.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "scheduled_closing_time", "status"]])
+
         listings_agregados = 0
         auctions_agregadas = 0
+        hoy_str = datetime.now().strftime("%Y-%m-%d")
 
-        for item in items:
-            item_id = item.get("itemId", "")
-            title = item.get("title", "")
+        # Paginación para extraer TODOS sin límite
+        offset = 0
+        limit = 100  # Pedimos bloques de 100 en 100
+        
+        while True:
+            search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit={limit}&offset={offset}"
+            response = requests.get(search_url, headers=headers)
             
-            # Intentar extraer precio
-            price_info = item.get("price", {})
-            price = float(price_info.get("value", 0))
+            if response.status_code != 200:
+                break
+
+            data = response.json()
+            items = data.get("itemSummaries", [])
             
-            # Determinar tipo de compra (Buy It Now o Subasta)
-            buying_options = item.get("buyingOptions", [])
-            
-            # Fecha actual del registro
+            if not items:
+                break # Si ya no hay más artículos, rompemos el ciclo
+
             fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            if "AUCTION" in buying_options:
-                # Es subasta -> va a la pestaña Auctions
-                # Obtenemos la hora de fin si la API la provee
-                item_end_date = item.get("itemEndDate", "")
-                ws_auctions.append_row([
-                    item_id, "PSA 10", fecha_actual, title, price, 0.0, item_end_date, "Pending"
-                ])
-                auctions_agregadas += 1
-            else:
-                # Es Buy It Now -> va a la pestaña Listings
-                ws_listings.append_row([
-                    item_id, "PSA 10", fecha_actual, title, price, "Buy It Now", price, 1
-                ])
-                listings_agregados += 1
+            for item in items:
+                item_id = item.get("itemId", "")
+                title = item.get("title", "")
+                price_info = item.get("price", {})
+                price = float(price_info.get("value", 0))
+                buying_options = item.get("buyingOptions", [])
+
+                if "AUCTION" in buying_options:
+                    item_end_date = item.get("itemEndDate", "")
+                    if item_end_date.startswith(hoy_str):
+                        ws_auctions.append_row([
+                            item_id, "PSA 10", fecha_actual, title, price, 0.0, item_end_date, "Pending"
+                        ])
+                        auctions_agregadas += 1
+                else:
+                    ws_listings.append_row([
+                        item_id, "PSA 10", fecha_actual, title, price, "Buy It Now", price, 1
+                    ])
+                    listings_agregados += 1
+
+            # Incrementamos el offset para la siguiente página
+            offset += limit
+            
+            # Protección por si la API regresa menos de los solicitados o llegamos al tope general de eBay
+            if len(items) < limit:
+                break
 
         return jsonify({
             "status": "success",
-            "message": f"Freeze completado con éxito. Buy It Now guardados: {listings_agregados}, Subastas guardadas: {auctions_agregadas}"
+            "message": f"Extracción total completada. Buy It Now: {listings_agregados}, Subastas de hoy: {auctions_agregadas}"
         })
 
     except Exception as e:
