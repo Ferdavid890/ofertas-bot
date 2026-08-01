@@ -16,20 +16,19 @@ SPREADSHEET_NAME = "Ebay_App"
 def conectar_sheets():
     try:
         credentials_json_str = os.environ.get("GOOGLE_CREDENTIALS_JSON")
-        if not credentials_json_str:
-            print("Error: La variable de entorno GOOGLE_CREDENTIALS_JSON no está configurada.")
+        
+        if not credentials_json_str or credentials_json_str.strip() == "":
+            print("❌ ATENCIÓN: La variable de entorno 'GOOGLE_CREDENTIALS_JSON' no está configurada o está vacía en Render.")
             return None
             
-        # Limpiar espacios y asegurar formato multilínea correcto
         credentials_json_str = credentials_json_str.strip()
-        
-        # Cargar el JSON soportando saltos de línea internos
         creds_info = json.loads(credentials_json_str, strict=False)
+        
         creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
         client = gspread.authorize(creds)
         return client.open(SPREADSHEET_NAME)
     except Exception as e:
-        print(f"Error detallado Google Sheets: {e}")
+        print(f"❌ Error detallado Google Sheets: {e}")
         return None
 
 @app.route("/")
@@ -45,7 +44,7 @@ def home():
             return "¡Conexión exitosa! Revisa tu Google Sheets, el registro de prueba ya fue enviado."
         except Exception as e:
             return f"Conectado al archivo, pero error en la tabla: {e}"
-    return "Error de credenciales. Revisa los logs en Render."
+    return "Error: Falta configurar la variable 'GOOGLE_CREDENTIALS_JSON' en Render o revisar permisos."
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
