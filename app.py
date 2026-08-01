@@ -1,7 +1,7 @@
 import os
 import base64
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import Flask, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
@@ -95,11 +95,10 @@ def ejecutar_freeze_diario():
 
         listings_agregados = 0
         auctions_agregadas = 0
-        hoy_str = datetime.now().strftime("%Y-%m-%d")
-
+        
         # Paginación para extraer TODOS sin límite
         offset = 0
-        limit = 100  # Pedimos bloques de 100 en 100
+        limit = 100
         
         while True:
             search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit={limit}&offset={offset}"
@@ -112,40 +111,40 @@ def ejecutar_freeze_diario():
             items = data.get("itemSummaries", [])
             
             if not items:
-                break # Si ya no hay más artículos, rompemos el ciclo
+                break
 
             fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             for item in items:
                 item_id = item.get("itemId", "")
                 title = item.get("title", "")
+                
                 price_info = item.get("price", {})
                 price = float(price_info.get("value", 0))
+                
                 buying_options = item.get("buyingOptions", [])
+                item_end_date = item.get("itemEndDate", "")
 
-                if "AUCTION" in buying_options:
-                    item_end_date = item.get("itemEndDate", "")
-                    if item_end_date.startswith(hoy_str):
-                        ws_auctions.append_row([
-                            item_id, "PSA 10", fecha_actual, title, price, 0.0, item_end_date, "Pending"
-                        ])
-                        auctions_agregadas += 1
+                # Verificamos si es subasta o si contiene fecha de cierre inminente
+                if "AUCTION" in buying_options or item_end_date:
+                    # Si tiene fecha de cierre, lo mandamos a Auctions para evaluarlo
+                    ws_auctions.append_row([
+                        item_id, "PSA 10", fecha_actual, title, price, 0.0, item_end_date, "Pending"
+                    ])
+                    auctions_agregadas += 1
                 else:
                     ws_listings.append_row([
                         item_id, "PSA 10", fecha_actual, title, price, "Buy It Now", price, 1
                     ])
                     listings_agregados += 1
 
-            # Incrementamos el offset para la siguiente página
             offset += limit
-            
-            # Protección por si la API regresa menos de los solicitados o llegamos al tope general de eBay
             if len(items) < limit:
                 break
 
         return jsonify({
             "status": "success",
-            "message": f"Extracción total completada. Buy It Now: {listings_agregados}, Subastas de hoy: {auctions_agregadas}"
+            "message": f"Extracción total completada. Buy It Now: {listings_agregados}, Subastas/Registros con cierre: {auctions_agregadas}"
         })
 
     except Exception as e:
