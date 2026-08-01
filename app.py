@@ -46,7 +46,6 @@ def obtener_token_ebay():
     client_secret = os.environ.get("EBAY_CLIENT_SECRET")
 
     if not client_id or not client_secret:
-        print("Faltan las variables de entorno de eBay (EBAY_CLIENT_ID o EBAY_CLIENT_SECRET) en Render.")
         return None
 
     credentials = f"{client_id}:{client_secret}"
@@ -62,15 +61,11 @@ def obtener_token_ebay():
         "scope": "https://api.ebay.com/oauth/api_scope"
     }
 
-    try:
-        response = requests.post(url, headers=headers, data=body)
-        if response.status_code == 200:
-            return response.json().get("access_token")
-        else:
-            print(f"Error HTTP de eBay al autenticar: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        print(f"Excepción conectando a eBay: {e}")
+    response = requests.post(url, headers=headers, data=body)
+    if response.status_code == 200:
+        return response.json().get("access_token")
+    else:
+        print(f"Error eBay Auth: {response.text}")
         return None
 
 @app.route("/")
@@ -79,15 +74,15 @@ def home():
 
 @app.route("/ejecutar-freeze-diario", methods=["GET"])
 def ejecutar_freeze_diario():
-    sheet = conectar_sheets()
-    if not sheet:
-        return jsonify({"status": "error", "message": "No se pudo conectar a Google Sheets"}), 500
-
-    token = obtener_token_ebay()
-    if not token:
-        return jsonify({"status": "error", "message": "No se pudo autenticar con la API de eBay. Revisa los Logs de Render para ver el detalle técnico."}), 500
-
     try:
+        sheet = conectar_sheets()
+        if not sheet:
+            return jsonify({"status": "error", "message": "Fallo al conectar con Google Sheets. Revisa las credenciales."}), 500
+
+        token = obtener_token_ebay()
+        if not token:
+            return jsonify({"status": "error", "message": "Fallo al autenticar con la API de eBay."}), 500
+
         headers = {
             "Authorization": f"Bearer {token}",
             "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
@@ -99,17 +94,14 @@ def ejecutar_freeze_diario():
         listings_data = []
         auctions_data = []
         
-        # Zona horaria de CDMX
         tz_cdmx = zoneinfo.ZoneInfo("America/Mexico_City")
         ahora_cdmx = datetime.now(tz_cdmx)
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
-        
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
         
         offset = 0
         limit = 100
         
-        # Paginación para extraer TODOS sin límite de cantidad
         while True:
             search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit={limit}&offset={offset}"
             response = requests.get(search_url, headers=headers)
@@ -131,17 +123,14 @@ def ejecutar_freeze_diario():
                 buying_options = item.get("buyingOptions", [])
                 item_end_date_str = item.get("itemEndDate", "")
 
-                # Verificamos si es una subasta de verdad
                 if "AUCTION" in buying_options and item_end_date_str:
                     try:
-                        # Convertir la fecha UTC de eBay a la hora local de CDMX
                         dt_utc = datetime.fromisoformat(item_end_date_str.replace("Z", "+00:00"))
                         dt_cdmx = dt_utc.astimezone(tz_cdmx)
                         
                         fecha_cierre_cdmx_str = dt_cdmx.strftime("%Y-%m-%d")
                         hora_cierre_formato = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-                        # Filtro estricto: ¿Cierra hoy exactamente en horario CDMX?
                         if fecha_cierre_cdmx_str == hoy_cdmx_str:
                             auctions_data.append([
                                 item_id, "PSA 10", fecha_registro_actual, title, price, 0.0, hora_cierre_formato, "Pending"
@@ -149,7 +138,6 @@ def ejecutar_freeze_diario():
                     except Exception:
                         pass 
                 else:
-                    # Si no es subasta, va directo a Buy It Now
                     listings_data.append([
                         item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1
                     ])
@@ -158,7 +146,6 @@ def ejecutar_freeze_diario():
             if len(items) < limit:
                 break
 
-        # Guardado masivo seguro en Google Sheets (bloques)
         ws_listings.clear()
         ws_listings.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days"]])
         if listings_data:
@@ -175,7 +162,8 @@ def ejecutar_freeze_diario():
         })
 
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        # Esto te mostrará el error exacto en pantalla en lugar de un genérico Internal Server Error
+        return jsonify({"status": "error_critico", "detalle": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(host="0.0.0.0", port=10000, debug=True)
