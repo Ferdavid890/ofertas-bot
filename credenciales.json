@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "ebaybotapp",
+  "private_key_id": "0b1635bd3720a26a089a85d884db9449a4fafd46",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCl/idli9Zb1ubh\n6Tok77z4Bp22s/Ph0f4UDlGJ2Y2AC1ODuosJ8eh7f5RiqAbffVSkRiamKhUxFhrC\nl/oDnrsWlITtCkzP9I5x6V52kM11UnVDjtqg3Blfot6zjgKmTtZC8O+HYpVf8cYd\nEy9EX/cgQf3fSxbjmrS6r5CWjY6kMSdq1Vhp5DfwlW16sdCXyqvxQsefsJ88edJV\n2dFHjXYkP4bA/sktqtsWfNK4+Rbq/pory3d+h1G7Dg5PKXw2LzsqM4ppylZdw1/W\nYu7paF0XIjpWYQU7CSj9lAzsGqhFLp9kwgexxJvSf+n+rqNab0kkVJ/gBupGfP/K\nBAICTKMFAgMBAAECggEAAzJHs+7ja9VRkNwa4Ic1TlliRBhnA9w1VlGIRG1KCkMt\nkoXPE5vy7B3iz5uItlkFfjxTljONQOq6DTE8AUHXPHITtTTTkdWVwJ/Lz+Ct9Cpo\nU6q2jw5t9qd+PlrntigifBuDoUnGsphHRlwONvTaH2bl6pzZjfx2qnmjASMssgCw\nXaywghkuNoKea7NNZ9hfOYL8Gne4oBzLDA+r4Mb5hB0BIgb0UuMBOfqbGJcutsSj\noh82Y9sl2eUU+jqYXJ9V0C3MYyl1F7TL3gHYoYMcxanXySX1oGiDT20ksTKqEIff\n3r3xgaOTjicynaKeeOag0BmfOZCBJspoosPZEkVBqQKBgQDWS0ti+eQkNH6U/OLW\nk9qPzzP/rup8wYe12aSd95P6P7jbMZjGbduwvEGXf7r55yRSS+KmeUDYGT8HvoPq\nLpfNjc/uxKfnRxlUAYArIhj36IVJI8hJejvpETgCxDAV7M8jGCF8iSsatjuq6XMq\n4vYIsYZbrchBKwkgXQKeTY0O7wKBgQDGTFur2FRmj7LadIiQtHb+ImvD/pqAozp/\nTc/JVRNjvEFyjVoskbHug6W2uJPbtN8RWxKAEYpJjB32EidGuinMpPzZhe08I6tZ\nkGE3IQXnqWq/GEcHi6BGBWvWj+hJe0an/Y1s0L9l+6hMtTxCmvPVMc3/ZDOPsNdj\nCroEvzrtSwKBgGcGhBPtuDV/12uhuR0YsHd7UrCWU73u/WP8YxxfLxGdGS6oxZ6A\nqqJpn89KZYZIDjpSqYEHwpkiah87BQjNpcX5bAKLIX4bvJ2aqxgRqJdnfs0PGvfY\ngH0o/hi2Ybfoxh1FOLQ67jJFcqJU4j24KDk9wC7Lef96xUR98whQmISZAoGBAIQ6\nZKKJhXZCehwLuwjrHbHG2B+AhhwjPB2pkFYLgftujCHLugagPIr0hCr8l7PYvyp+\nlS6LA7CZW107q68Q8lCA8A5IrPH+QwNdMEYnoh1hLkow8SRJ6dznPop7uYROTMY2\nX/jgldB2aDqGW6F6W/+cz2VutqcpX+auP25s6elTAoGALS4MeJdQ8IRpaWaksQLT\nFkul5raIh7avr8XE2ofUnyuGUKtn8m1P/hRQeBriXyyBcayByFYJswUIfE4aCYD/\n0JBjHUkNSeJNM+cTuSL0mL15Eg9KmJwRirUe68CXcwPICuSvoAGd481Ce1gYotLs\nrMrUpQoKmq2dL6QUeyaLo6E=\n-----END PRIVATE KEY-----\n",
+  "client_email": "bot-sheets@ebaybotapp.iam.gserviceaccount.com",
+  "client_id": "105706175924935082916",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/bot-sheets%40ebaybotapp.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
