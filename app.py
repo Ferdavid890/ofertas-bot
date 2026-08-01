@@ -1,5 +1,4 @@
 import os
-import json
 from datetime import datetime
 from flask import Flask, jsonify
 import gspread
@@ -44,31 +43,17 @@ def home():
 
 @app.route("/ejecutar-freeze-diario", methods=["GET"])
 def ejecutar_freeze_diario():
-    """
-    Ruta diseñada para ejecutarse a las 6:00 AM.
-    Extraerá los listings (Buy It Now) y las subastas que cierran hoy (Auctions).
-    """
     sheet = conectar_sheets()
     if not sheet:
         return jsonify({"status": "error", "message": "No se pudo conectar a Google Sheets"}), 500
 
     try:
-        # Aquí irá la lógica de consulta a la API de eBay para Lorcana PSA 10
-        # Ejemplo de registro en Listings (Buy It Now):
         ws_listings = sheet.worksheet("Listings")
         ws_listings.append_row([
             "EBAY-LORCANA-001", "12345678", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Lorcana PSA 10 Test Card", 250.0, "Buy It Now", 250.0, 5
         ])
-
-        # Ejemplo de registro en Auctions (Subastas que cierran hoy):
-        ws_auctions = sheet.worksheet("Auctions")
-        ws_auctions.append_row([
-            "EBAY-LORCANA-AUD-1", "87654321", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "Lorcana PSA 10 Auction Test", 100.0, "", "2026-08-01 21:30:00", "Pending"
-        ])
-
-        return jsonify({"status": "success", "message": "Freeze de las 6:00 AM ejecutado correctamente."})
+        return jsonify({"status": "success", "message": "Freeze registrado correctamente en Listings."})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
