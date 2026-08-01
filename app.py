@@ -1,7 +1,8 @@
 import os
 import base64
 import requests
-from datetime import datetime, timezone
+from datetime import datetime
+import zoneinfo # Librería estándar de Python para zonas horarias
 from flask import Flask, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
@@ -56,7 +57,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://api.ebay.com/oauth/api_scope"
+        "scope": "https://oauth2.googleapis.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -86,17 +87,18 @@ def ejecutar_freeze_diario():
         }
         
         ws_listings = sheet.worksheet("Listings")
-        ws_listings.clear()
-        ws_listings.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days"]])
-
         ws_auctions = sheet.worksheet("Auctions")
-        ws_auctions.clear()
-        ws_auctions.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "scheduled_closing_time", "status"]])
 
-        listings_agregados = 0
-        auctions_agregadas = 0
+        listings_data = []
+        auctions_data = []
         
-        # Paginación para extraer TODOS sin límite
+        # Zona horaria de CDMX
+        tz_cdmx = zoneinfo.ZoneInfo("America/Mexico_City")
+        ahora_cdmx = datetime.now(tz_cdmx)
+        hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
+        
+        fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
+        
         offset = 0
         limit = 100
         
@@ -113,38 +115,55 @@ def ejecutar_freeze_diario():
             if not items:
                 break
 
-            fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
             for item in items:
                 item_id = item.get("itemId", "")
                 title = item.get("title", "")
-                
                 price_info = item.get("price", {})
                 price = float(price_info.get("value", 0))
-                
                 buying_options = item.get("buyingOptions", [])
-                item_end_date = item.get("itemEndDate", "")
+                item_end_date_str = item.get("itemEndDate", "")
 
-                # Verificamos si es subasta o si contiene fecha de cierre inminente
-                if "AUCTION" in buying_options or item_end_date:
-                    # Si tiene fecha de cierre, lo mandamos a Auctions para evaluarlo
-                    ws_auctions.append_row([
-                        item_id, "PSA 10", fecha_actual, title, price, 0.0, item_end_date, "Pending"
-                    ])
-                    auctions_agregadas += 1
+                # Verificamos si es una subasta de verdad
+                if "AUCTION" in buying_options and item_end_date_str:
+                    try:
+                        # Convertir la fecha UTC de eBay a la hora local de CDMX
+                        dt_utc = datetime.fromisoformat(item_end_date_str.replace("Z", "+00:00"))
+                        dt_cdmx = dt_utc.astimezone(tz_cdmx)
+                        
+                        fecha_cierre_cdmx_str = dt_cdmx.strftime("%Y-%m-%d")
+                        hora_cierre_formato = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
+
+                        # Filtro estricto: ¿Cierra hoy exactamente en horario CDMX?
+                        if fecha_cierre_cdmx_str == hoy_cdmx_str:
+                            auctions_data.append([
+                                item_id, "PSA 10", fecha_registro_actual, title, price, 0.0, hora_cierre_formato, "Pending"
+                            ])
+                    except Exception:
+                        pass # Si hay error parseando la fecha del ítem, lo ignoramos para evitar que rompa el ciclo
                 else:
-                    ws_listings.append_row([
-                        item_id, "PSA 10", fecha_actual, title, price, "Buy It Now", price, 1
+                    # Si no es subasta, va directo a Buy It Now
+                    listings_data.append([
+                        item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1
                     ])
-                    listings_agregados += 1
 
             offset += limit
             if len(items) < limit:
                 break
 
+        # Guardado masivo seguro en Google Sheets (bloques)
+        ws_listings.clear()
+        ws_listings.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days"]])
+        if listings_data:
+            ws_listings.append_rows(listings_data)
+
+        ws_auctions.clear()
+        ws_auctions.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "scheduled_closing_time", "status"]])
+        if auctions_data:
+            ws_auctions.append_rows(auctions_data)
+
         return jsonify({
             "status": "success",
-            "message": f"Extracción total completada. Buy It Now: {listings_agregados}, Subastas/Registros con cierre: {auctions_agregadas}"
+            "message": f"Sincronización CDMX exitosa. Buy It Now: {len(listings_data)}, Subastas cerrando hoy CDMX: {len(auctions_data)}"
         })
 
     except Exception as e:
