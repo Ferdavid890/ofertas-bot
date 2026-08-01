@@ -1,3 +1,4 @@
+import os
 from flask import Flask
 from datetime import datetime
 import gspread
@@ -10,56 +11,15 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 SPREADSHEET_NAME = "Ebay_App"
-
-# Llave limpia formateada explícitamente para evitar problemas de padding y PEM
-PRIVATE_KEY_CERT = (
-    "-----BEGIN PRIVATE KEY-----\n"
-    "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDeHr+XX9mNzuXW"
-    "LaJvDLhLmZ75t3Jou5TOmD3qdpo8/49C6VhlEo2hqTQh1Y/03mhmozEN+cyeAJE+\n"
-    "vTjH0BNu8YE2R3hCg61UI+XCY2xCPuRTg+dgdF2j7z3EHkdHhaui6l65rA5qwbyq"
-    "eS+teC/kiPfQuw/XMFiZWM6YfMuHQX/M5PI2c9TygsTYJPbxgcFGfgtEujlNlHmg\n"
-    "QHYXPi4SRNf9BnP0eRUiVFUaSD7cFiKWLuPv6C2XEHF4SXEJdhnJQzpHJy+siLz2"
-    "YjVy6naY67EV3WBa9pbq/dUh+Xi/YwkIy1OaBy9d4+UrguudbiWA8qbfFrxNXty9\n"
-    "MUZBNBzDAgMBAAECggEAE0cn6cNv5lbmq8gaKPk5pZYXriS10VE2gRfFh+vzRwgH"
-    "Lw+BlIQftsAwvh8C94W2GfJf946Oq8fw0zkpDG6KwT5EsKlTTrKPAJZ9AnoOk1FS\n"
-    "D82K71wqJGhHPBZEqXh4hRNCVWsRdUKLVWBfOvcLcRJSL9OMdGjFx8llZOav43Uq"
-    "dSXFe70FmqooVE8P3KQX2o6FKVDv6mJ1Za5Hin/qWVyhRaLoSVjmvNkq41q8ce0n\n"
-    "FTp6PSrWAyUF149ULNRxXRW6obffnN27/O62yuZdZImg0b2wsQ6YsWzXsN9hUL8x"
-    "Amxj8uLdSkmfncMMu2+Ig+2Civij6lXsSssHgQWJwQKBgQDxQ24OAyeC2lcIzDNF\n"
-    "3fBJNX5YXnKwNY1EcX0PmNTz2x4RF+E8DhrElf9lNnukqgcdr3K7PS6BSB133YeS\n"
-    "e4naatfHNlBgkptYhgwpXmif+wBpPSPObbUu4fmVOwLGqj1JeKMlIy3H8uLuBRrI\n"
-    "7jIDwfWtOrSGWcQhE4M5T8JZvwKBgQDrr/rp5LFvohVGvMJWLPRIPVviy1xdBHpv"
-    "gWkmupCdiJH0hS6sXdqHvPGSyrPEeOr31QWiacP4uzCADy7MXUmVWn/8RaeU6z1J\n"
-    "UIeROnDnDIAaU+5jiTEgBeMS/31CGXIATPGGtemZO+KikIDd+1/1qdVwFDfGM0Br\n"
-    "srY6fOtV/QKBgDNCREut1+MxSHSSDgK2GKs1NlbIGk3d0tnL0upRak01LLos/Kmp\n"
-    "nxX4m8FAstzBQ/5oLALFPWmYVUE17P6aboLpLIPUuUP1zqJWyRTs0173FslyppMXj\n"
-    "AS+oy0Ite3WCDetiOidVxhBJRnWTmBFAqleqCex4IIq637S3VJYEoCI5AoGBANGv\n"
-    "nwNnFGMQL/Ufw+il3V2LKDG0LpsIvEMsR5L6LL8yoS8qzjyHVYm5vgLGr3CJJvir+"
-    "gEPOO4eY6v6UA3vY53WUjdehFQad/+mxVtuzle1KJtLFp4sw7N7jvfISEpvzTYTM\n"
-    "7/l88Tbem7UsQSq90dMb5YQQyMpyoLbwycXhi/L1AoGAYqL8ebnAHC/JJo6tFHXQ\n"
-    "d2qegC6DUUdC68K63PJ1mw6xuDB9qJhpVf9Dg/UMRpEZxyW3MIkPB/rVsAjAJ6on\n"
-    "DGgssEnha4cNbH/wyj6gvKd42gfc2EsMK5lDr68k6GlRFHZhTG7YXP3fOtKOfNUp\n"
-    "Ese6MpVS2fzWixxjIdrO+3k=\n"
-    "-----END PRIVATE KEY-----"
-)
-
-CREDENTIALS_DICT = {
-    "type": "service_account",
-    "project_id": "ebaybotapp",
-    "private_key_id": "e9a0968cc0f4716f04d7f1be34ae2666c94cf65e",
-    "private_key": PRIVATE_KEY_CERT,
-    "client_email": "bot-sheets@ebaybotapp.iam.gserviceaccount.com",
-    "client_id": "105706175924935082916",
-    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-    "token_uri": "https://oauth2.googleapis.com/token",
-    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-    "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/bot-sheets%40ebaybotapp.iam.gserviceaccount.com",
-    "universe_domain": "googleapis.com"
-}
+CREDENTIALS_FILE = "credenciales.json"
 
 def conectar_sheets():
     try:
-        creds = Credentials.from_service_account_info(CREDENTIALS_DICT, scopes=SCOPES)
+        if not os.path.exists(CREDENTIALS_FILE):
+            print(f"Error: No se encontró el archivo {CREDENTIALS_FILE} en el repositorio.")
+            return None
+            
+        creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
         client = gspread.authorize(creds)
         return client.open(SPREADSHEET_NAME)
     except Exception as e:
@@ -79,7 +39,7 @@ def home():
             return "¡Conexión exitosa! Revisa tu Google Sheets, el registro de prueba ya fue enviado."
         except Exception as e:
             return f"Conectado al archivo, pero error en la tabla: {e}"
-    return "Error de firma o credenciales. Revisa los logs de Render."
+    return "Error de credenciales. Asegúrate de que 'credenciales.json' está en el repositorio de GitHub."
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
