@@ -11,26 +11,10 @@ SCOPES = [
 ]
 SPREADSHEET_NAME = "Ebay_App"
 
-# Llave privada en línea continua con saltos de seguridad explícitos
-PRIVATE_KEY_CLEAN = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDeHr+XX9mNzuXWLaJvDLhLmZ75t3Jou5TOmD3qdpo8/49C6VhlEo2hqTQh1Y/03mhmozEN+cyeAJE+vTjH0BNu8YE2R3hCg61UI+XCY2xCPuRTg+dgdF2j7z3EHkdHhaui6l65rA5qwbyqeS+teC/kiPfQuw/XMFiZWM6YfMuHQX/M5PI2c9TygsTYJPbxgcFGfgtEujlNlHmgQHYXPi4SRNf9BnP0eRUiVFUaSD7cFiKWLuPv6C2XEHF4SXEJdhnJQzpHJy+siLz2YjVy6naY67EV3WBa9pbq/dUh+Xi/YwkIy1OaBy9d4+UrguudbiWA8qbfFrxNXty9MUZBNBzDAgMBAAECggEAE0cn6cNv5lbmq8gaKPk5pZYXriS10VE2gRfFh+vzRwgHLw+BlIQftsAwvh8C94W2GfJf946Oq8fw0zkpDG6KwT5EsKlTTrKPAJZ9AnoOk1FSD82K71wqJGhHPBZEqXh4hRNCVWsRdUKLVWBfOvcLcRJSL9OMdGjFx8llZOav43UqdSXFe70FmqooVE8P3KQX2o6FKVDv6mJ1Za5Hin/qWVyhRaLoSVjmvNkq41q8ce0nFTp6PSrWAyUF149ULNRxXRW6obffnN27/O62yuZdZImg0b2wsQ6YsWzXsN9hUL8xAmxj8uLdSkmfncMMu2+Ig+2Civij6lXsSssHgQWJwQKBgQDxQ24OAyeC2lcIzDNF3fBJNX5YXnKwNY1EcX0PmNTz2x4RF+E8DhrElf9lNnukqgcdr3K7PS6BSB133YeSe4naatfHNlBgkptYhgwpXmif+wBpPSPObbUu4fmVOwLGqj1JeKMlIy3H8uLuBRrI7jIDwfWtOrSGWcQhE4M5T8JZvwKBgQDrr/rp5LFvohVGvMJWLPRIPVviy1xdBHpvgWkmupCdiJH0hS6sXdqHvPGSyrPEeOr31QWiacP4uzCADy7MXUmVWn/8RaeU6z1JUIeROnDnDIAaU+5jiTEgBeMS/31CGXIATPGGtemZO+KikIDd+1/1qdVwFDfGM0BrsrY6fOtV/QKBgDNCREut1+MxSHSSDgK2GKs1NlbIGk3d0tnL0upRak01LLos/KpmpxX4m8FAstzBQ/5oLALFPWmYVUE17P6aboLpLIPUuUP1zqJWyRTs0173FslyppMXjAS+oy0Ite3WCDetiOidVxhBJRnWTmBFAqleqCex4IIq637S3VJYEoCI5AoGBANGvnwNnFGMQL/Ufw+il3V2LKDG0LpsIvEMsR5L6LL8yoS8qzjyHVYm5vgLGr3CJJvir+gEPOO4eY6v6UA3vY53WUjdehFQad/+mxVtuzle1KJtLFp4sw7N7jvfISEpvzTYTM7/l88Tbem7UsQSq90dMb5YQQyMpyoLbwycXhi/L1AoGAYqL8ebnAHC/JJo6tFHXQndqegC6DUUdC68K63PJ1mw6xuDB9qJhpVf9Dg/UMRpEZxyW3MIkPB/rVsAjAJ6onDGgssEnha4cNbH/wyj6gvKd42gfc2EsMK5lDr68k6GlRFHZhTG7YXP3fOtKOfNUpEse6MpVS2fzWixxjIdrO+3k=\n-----END PRIVATE KEY-----"
-
-CREDENTIALS_DICT = {
-  "type": "service_account",
-  "project_id": "ebaybotapp",
-  "private_key_id": "e9a0968cc0f4716f04d7f1be34ae2666c94cf65e",
-  "private_key": PRIVATE_KEY_CLEAN,
-  "client_email": "bot-sheets@ebaybotapp.iam.gserviceaccount.com",
-  "client_id": "105706175924935082916",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/bot-sheets%40ebaybotapp.iam.gserviceaccount.com",
-  "universe_domain": "googleapis.com"
-}
-
 def conectar_sheets():
     try:
-        creds = Credentials.from_service_account_info(CREDENTIALS_DICT, scopes=SCOPES)
+        # Lee directamente el archivo físico credenciales.json sin manipulación de texto
+        creds = Credentials.from_service_account_file("credenciales.json", scopes=SCOPES)
         client = gspread.authorize(creds)
         return client.open(SPREADSHEET_NAME)
     except Exception as e:
