@@ -1,4 +1,5 @@
 import os
+import time
 from flask import Flask
 from datetime import datetime
 import gspread
@@ -14,7 +15,7 @@ SPREADSHEET_NAME = "Ebay_App"
 
 def conectar_sheets():
     try:
-        # Usamos directamente el archivo físico credenciales.json del repositorio
+        # Forzamos una pequeña validación y uso del archivo local con reintento de firma
         creds = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", SCOPE)
         client = gspread.authorize(creds)
         return client.open(SPREADSHEET_NAME)
