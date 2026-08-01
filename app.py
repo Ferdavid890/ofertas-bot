@@ -20,14 +20,11 @@ def conectar_sheets():
             print("Error: La variable de entorno GOOGLE_CREDENTIALS_JSON no está configurada.")
             return None
             
-        # Limpiar comillas extras si por error las pusieron al copiar en Render
+        # Limpiar espacios y asegurar formato multilínea correcto
         credentials_json_str = credentials_json_str.strip()
-        if credentials_json_str.startswith("'") and credentials_json_str.endswith("'"):
-            credentials_json_str = credentials_json_str[1:-1]
-        elif credentials_json_str.startswith('"') and credentials_json_str.endswith('"'):
-            credentials_json_str = credentials_json_str[1:-1]
-
-        creds_info = json.loads(credentials_json_str)
+        
+        # Cargar el JSON soportando saltos de línea internos
+        creds_info = json.loads(credentials_json_str, strict=False)
         creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
         client = gspread.authorize(creds)
         return client.open(SPREADSHEET_NAME)
@@ -48,7 +45,7 @@ def home():
             return "¡Conexión exitosa! Revisa tu Google Sheets, el registro de prueba ya fue enviado."
         except Exception as e:
             return f"Conectado al archivo, pero error en la tabla: {e}"
-    return "Error de credenciales o formato JSON. Revisa los logs en Render."
+    return "Error de credenciales. Revisa los logs en Render."
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
