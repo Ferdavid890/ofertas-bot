@@ -1,28 +1,21 @@
 import os
-import json
 from flask import Flask
 from datetime import datetime
 import gspread
-from google.oauth2.service_account import Credentials
+from oauth2client.service_account import ServiceAccountCredentials
 
 app = Flask(__name__)
 
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
+SCOPE = [
+    "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/drive"
 ]
 SPREADSHEET_NAME = "Ebay_App"
 
 def conectar_sheets():
     try:
-        creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
-        if creds_json:
-            # Carga el JSON asegurando que los saltos de línea de la llave privada funcionen bien
-            creds_dict = json.loads(creds_json)
-            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-        else:
-            creds = Credentials.from_service_account_file("credenciales.json", scopes=SCOPES)
-            
+        # Usamos directamente el archivo físico credenciales.json del repositorio
+        creds = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", SCOPE)
         client = gspread.authorize(creds)
         return client.open(SPREADSHEET_NAME)
     except Exception as e:
