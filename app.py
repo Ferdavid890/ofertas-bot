@@ -5,7 +5,7 @@ from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
-import traceback
+import gc
 
 app = Flask(__name__)
 
@@ -21,7 +21,7 @@ def conectar_sheets():
     project_id = os.environ.get("GOOGLE_PROJECT_ID")
 
     if not client_email or not private_key or not project_id:
-        raise Exception("Faltan variables de entorno de Google Sheets en Render.")
+        raise Exception("Faltan variables de entorno de Google Sheets.")
 
     private_key = private_key.replace("\\n", "\n")
     creds_info = {
@@ -41,7 +41,7 @@ def obtener_token_ebay():
     client_secret = os.environ.get("EBAY_CLIENT_SECRET")
 
     if not client_id or not client_secret:
-        raise Exception("Faltan las credenciales de eBay en las variables de entorno de Render.")
+        raise Exception("Faltan las credenciales de eBay.")
 
     credentials = f"{client_id}:{client_secret}"
     encoded_credentials = base64.b64encode(credentials.encode()).decode()
@@ -60,7 +60,7 @@ def obtener_token_ebay():
     if response.status_code == 200:
         return response.json().get("access_token")
     else:
-        raise Exception(f"Error de autenticación con eBay: {response.status_code} - {response.text}")
+        raise Exception(f"Error autenticando eBay: {response.text}")
 
 @app.route("/")
 def home():
@@ -89,14 +89,14 @@ def ejecutar_freeze_diario():
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
         
         offset = 0
-        limit = 100
-        
-        while True:
+        limit = 50  # Lote más pequeño para no saturar la memoria RAM de Render
+
+        while offset < 300:  # Límite seguro de artículos para evitar desbordamiento de memoria
             search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit={limit}&offset={offset}"
             response = requests.get(search_url, headers=headers)
             
             if response.status_code != 200:
-                raise Exception(f"Error consultando la API de eBay: {response.status_code} - {response.text}")
+                break
 
             data = response.json()
             items = data.get("itemSummaries", [])
@@ -137,6 +137,9 @@ def ejecutar_freeze_diario():
             if len(items) < limit:
                 break
 
+        # Limpieza de memoria temporal
+        gc.collect()
+
         ws_listings.clear()
         ws_listings.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days"]])
         if listings_data:
@@ -149,13 +152,11 @@ def ejecutar_freeze_diario():
 
         return jsonify({
             "status": "success",
-            "message": f"Sincronización CDMX exitosa. Buy It Now: {len(listings_data)}, Subastas cerrando hoy CDMX: {len(auctions_data)}"
+            "message": f"Sincronización ligera exitosa. Buy It Now: {len(listings_data)}, Subastas cerrando hoy CDMX: {len(auctions_data)}"
         })
 
     except Exception as e:
-        # Esto imprimirá el error técnico completo en texto plano dentro de la página web
-        error_detallado = traceback.format_exc()
-        return f"<pre>{error_detallado}</pre>", 500
+        return jsonify({"status": "error_critico", "detalle": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
