@@ -116,7 +116,6 @@ def proceso_fondo():
         ws_listings = sheet.worksheet("Listings")
         ws_auctions = sheet.worksheet("Auctions")
 
-        # Limpiamos las hojas antes de insertar los nuevos datos diarios para evitar duplicados
         ws_listings.clear()
         ws_auctions.clear()
 
@@ -128,25 +127,22 @@ def proceso_fondo():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
+        # Rangos de precios segmentados para evitar saturar la memoria y la API
         rangos_precios = [
             ("0", "50"), ("50", "100"), ("100", "150"), ("150", "200"),
             ("200", "250"), ("250", "300"), ("300", "350"), ("350", "400"),
             ("400", "450"), ("450", "500"), ("500", "550"), ("550", "600"),
             ("600", "650"), ("650", "700"), ("700", "750"), ("750", "800"),
             ("800", "850"), ("850", "900"), ("900", "950"), ("950", "1000"),
-            ("1000", "1100"), ("1100", "1200"), ("1200", "1300"), ("1300", "1400"),
-            ("1400", "1500"), ("1500", "1600"), ("1600", "1700"), ("1700", "1800"),
-            ("1800", "1900"), ("1900", "2000"), ("2000", "2250"), ("2250", "2500"),
-            ("2500", "2750"), ("2750", "3000"), ("3000", "3500"), ("3500", "4000"),
-            ("4000", "5000"), ("5000", "999999")
+            ("1000", "1500"), ("1500", "2000"), ("2000", "3000"), ("3000", "999999")
         ]
 
         todos_los_listings = []
-        print("=== Iniciando barrido de Buy It Now por capas (Acumulando en memoria) ===")
+        print("=== Iniciando barrido de Buy It Now por rangos de precios ===")
         for p_min, p_max in rangos_precios:
             offset = 0
             limit = 100
-            while offset < 2000:
+            while offset < 1000:
                 search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
                 response = requests.get(search_url, headers=headers)
                 
@@ -171,24 +167,24 @@ def proceso_fondo():
                 if len(items) < limit:
                     break
                 offset += limit
-                time.sleep(0.2)
-                gc.collect()
+                time.sleep(0.1)
+
+            gc.collect()
 
         if todos_los_listings:
             print(f"=== Insertando {len(todos_los_listings)} registros de Buy It Now en lotes ===")
-            # Dividir en bloques de 300 para no saturar la API de Google Sheets
             tamano_lote = 300
             for i in range(0, len(todos_los_listings), tamano_lote):
                 lote = todos_los_listings[i:i + tamano_lote]
                 ws_listings.append_rows(lote, value_input_option='USER_ENTERED')
-                time.sleep(1) # Pausa breve entre lotes
+                time.sleep(0.5)
 
         print("=== Iniciando barrido de Subastas ===")
         offset_auc = 0
         todas_las_subastas = []
         subastas_a_monitorear = []
 
-        while offset_auc < 2000:
+        while offset_auc < 1000:
             auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
             response = requests.get(auction_url, headers=headers)
             if response.status_code != 200:
@@ -243,7 +239,7 @@ def proceso_fondo():
             hilo_monitoreo.daemon = True
             hilo_monitoreo.start()
 
-        print("=== PROCESO DE FONDO COMPLETADO EXITOSAMENTE SIN SATURAR GOOGLE ===")
+        print("=== PROCESO DE FONDO COMPLETADO EXITOSAMENTE ===")
 
     except Exception as e:
         import traceback
@@ -260,7 +256,7 @@ def ejecutar_freeze_diario():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Sincronización masiva por lotes y monitoreo automático a 60s iniciados en segundo plano."
+        "message": "Sincronización por rangos y monitoreo iniciados en segundo plano."
     })
 
 if __name__ == "__main__":
