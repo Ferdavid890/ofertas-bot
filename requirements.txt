@@ -3,4 +3,3 @@ gunicorn
 requests
 gspread
 google-auth
-tzdata
