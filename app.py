@@ -66,7 +66,7 @@ def obtener_token_ebay():
 
 def proceso_fondo():
     try:
-        print("Iniciando proceso completo en segundo plano...")
+        print("Iniciando proceso completo con capas de 50 en segundo plano...")
         sheet = conectar_sheets()
         token = obtener_token_ebay()
 
@@ -89,18 +89,28 @@ def proceso_fondo():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Rangos limpios de 100 en 100
+        # Nuevas capas de 50 en 50 para máxima precisión
         rangos_precios = [
-            ("0", "100"),
-            ("101", "200"),
-            ("201", "300"),
-            ("301", "400"),
-            ("401", "500"),
-            ("501", "600"),
-            ("601", "700"),
-            ("701", "800"),
-            ("801", "900"),
-            ("901", "1000"),
+            ("0", "50"),
+            ("51", "100"),
+            ("101", "150"),
+            ("151", "200"),
+            ("201", "250"),
+            ("251", "300"),
+            ("301", "350"),
+            ("351", "400"),
+            ("401", "450"),
+            ("451", "500"),
+            ("501", "550"),
+            ("551", "600"),
+            ("601", "650"),
+            ("651", "700"),
+            ("701", "750"),
+            ("751", "800"),
+            ("801", "850"),
+            ("851", "900"),
+            ("901", "950"),
+            ("951", "1000"),
             ("1001", "1100"),
             ("1101", "1200"),
             ("1201", "1300"),
@@ -111,15 +121,17 @@ def proceso_fondo():
             ("1701", "1800"),
             ("1801", "1900"),
             ("1901", "2000"),
-            ("2001", "2500"),
-            ("2501", "3000"),
+            ("2001", "2250"),
+            ("2251", "2500"),
+            ("2501", "2750"),
+            ("2751", "3000"),
             ("3001", "3500"),
             ("3501", "4000"),
             ("4001", "5000"),
             ("5001", "999999")
         ]
 
-        print("Barrido de Buy It Now por capas iniciado...")
+        print("Barrido de Buy It Now por capas de 50 iniciado...")
         for p_min, p_max in rangos_precios:
             offset = 0
             limit = 100
@@ -211,7 +223,7 @@ def proceso_fondo():
             time.sleep(0.3)
             gc.collect()
 
-        print("Sincronización total con rangos de 100 finalizada con éxito.")
+        print("Sincronización total con capas de 50 finalizada con éxito.")
 
     except Exception as e:
         print(f"Error crítico en proceso de fondo: {str(e)}")
@@ -226,7 +238,7 @@ def ejecutar_freeze_diario():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Sincronización masiva con rangos de 100 en 100 iniciada en segundo plano correctamente."
+        "message": "Sincronización masiva con capas de 50 en 50 iniciada en segundo plano correctamente."
     })
 
 if __name__ == "__main__":
