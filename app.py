@@ -55,7 +55,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://api.ebay.com/oauth/api_scope"
+        "scope": "https://oauth2.googleapis.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -65,7 +65,7 @@ def obtener_token_ebay():
         raise Exception(f"Error autenticando eBay: {response.text}")
 
 def programar_captura_final(item_id, dt_cierre_objetivo):
-    """Función que espera hasta 60 segundos antes del cierre para consultar el precio final."""
+    """Función en segundo plano que espera hasta 60 segundos antes del cierre para actualizar el precio final."""
     try:
         ahora = datetime.now(timezone(timedelta(hours=-6)))
         diferencia_segundos = (dt_cierre_objetivo - ahora).total_seconds() - 60
@@ -103,7 +103,7 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
 
 def proceso_fondo():
     try:
-        print("Iniciando proceso completo en segundo plano...")
+        print("Iniciando proceso completo en segundo plano con capas y monitoreo...")
         sheet = conectar_sheets()
         token = obtener_token_ebay()
 
@@ -126,21 +126,22 @@ def proceso_fondo():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Rangos seguros con decimales para no perder ninguna carta
+        # Capas de precios continuas y seguras (capturan decimales y evitan saturar la memoria)
         rangos_precios = [
-            ("0", "50.99"), ("51", "100.99"), ("101", "150.99"), ("151", "200.99"),
-            ("201", "250.99"), ("251", "300.99"), ("301", "350.99"), ("351", "400.99"),
-            ("401", "450.99"), ("451", "500.99"), ("501", "550.99"), ("551", "600.99"),
-            ("601", "650.99"), ("651", "700.99"), ("701", "750.99"), ("751", "800.99"),
-            ("801", "850.99"), ("851", "900.99"), ("901", "950.99"), ("951", "1000.99"),
-            ("1001", "1100.99"), ("1101", "1200.99"), ("1201", "1300.99"), ("1301", "1400.99"),
-            ("1401", "1500.99"), ("1501", "1600.99"), ("1601", "1700.99"), ("1701", "1800.99"),
-            ("1801", "1900.99"), ("1901", "2000.99"), ("2001", "2250.99"), ("2251", "2500.99"),
-            ("2501", "2750.99"), ("2751", "3000.99"), ("3001", "3500.99"), ("3501", "4000.99"),
-            ("4001", "5000.99"), ("5001", "999999")
+            ("0", "50"), ("50", "100"), ("100", "150"), ("150", "200"),
+            ("200", "250"), ("250", "300"), ("300", "350"), ("350", "400"),
+            ("400", "450"), ("450", "500"), ("500", "550"), ("550", "600"),
+            ("600", "650"), ("650", "700"), ("700", "750"), ("750", "800"),
+            ("800", "850"), ("850", "900"), ("900", "950"), ("950", "1000"),
+            ("1000", "1100"), ("1100", "1200"), ("1200", "1300"), ("1300", "1400"),
+            ("1400", "1500"), ("1500", "1600"), ("1600", "1700"), ("1700", "1800"),
+            ("1800", "1900"), ("1900", "2000"), ("2000", "2250"), ("2250", "2500"),
+            ("2500", "2750"), ("2750", "3000"), ("3000", "3500"), ("3500", "4000"),
+            ("4000", "5000"), ("5000", "999999")
         ]
 
-        # 1. Barrido de Buy It Now
+        # 1. Barrido de Buy It Now por capas
+        print("Iniciando barrido de Buy It Now por capas...")
         for p_min, p_max in rangos_precios:
             offset = 0
             limit = 100
@@ -172,8 +173,10 @@ def proceso_fondo():
                 offset += limit
                 time.sleep(0.3)
                 gc.collect()
+        print("Barrido de Buy It Now finalizado.")
 
-        # 2. Barrido de Subastas
+        # 2. Barrido de Subastas y activación de temporizadores
+        print("Iniciando barrido de Subastas...")
         offset_auc = 0
         while offset_auc < 2000:
             auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
@@ -211,6 +214,7 @@ def proceso_fondo():
                                 item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, cierre_str, "Activa", item_url
                             ])
 
+                            # Lanzamos el hilo de monitoreo para los 60s antes del cierre
                             hilo_monitoreo = threading.Thread(target=programar_captura_final, args=(item_id, dt_cdmx))
                             hilo_monitoreo.daemon = True
                             hilo_monitoreo.start()
@@ -227,7 +231,7 @@ def proceso_fondo():
             time.sleep(0.3)
             gc.collect()
 
-        print("Sincronización total completada con éxito.")
+        print("Sincronización y programación de subastas finalizada con éxito.")
 
     except Exception as e:
         print(f"Error crítico en proceso de fondo: {str(e)}")
@@ -242,7 +246,7 @@ def ejecutar_freeze_diario():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Sincronización masiva y monitoreo automático iniciados en segundo plano."
+        "message": "Sincronización masiva por capas y monitoreo automático a 60s iniciados en segundo plano."
     })
 
 if __name__ == "__main__":
