@@ -6,6 +6,7 @@ from flask import Flask, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
 import gc
+import traceback
 
 app = Flask(__name__)
 
@@ -51,7 +52,6 @@ def obtener_token_ebay():
         "Content-Type": "application/x-www-form-urlencoded",
         "Authorization": f"Basic {encoded_credentials}"
     }
-    # Corregido: El scope correcto para la API de Browse de eBay
     body = {
         "grant_type": "client_credentials",
         "scope": "https://api.ebay.com/oauth/api_scope"
@@ -91,7 +91,6 @@ def ejecutar_freeze_diario():
         ahora_cdmx = datetime.now(tz_cdmx)
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # FASE 1: BARRIDA DE BUY IT NOW POR LAS 9 CAPAS DE PRECIO
         rangos_precios = [
             ("0", "500.00"),
             ("500.01", "1000.00"),
@@ -152,9 +151,11 @@ def ejecutar_freeze_diario():
         })
 
     except Exception as e:
+        error_completo = traceback.format_exc()
         return jsonify({
             "status": "error",
-            "error_detallado": str(e)
+            "detalle": str(e),
+            "traceback": error_completo
         }), 500
 
 if __name__ == "__main__":
