@@ -51,9 +51,10 @@ def obtener_token_ebay():
         "Content-Type": "application/x-www-form-urlencoded",
         "Authorization": f"Basic {encoded_credentials}"
     }
+    # Corregido: El scope correcto para la API de eBay Buy/Browse
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://oauth2.googleapis.com/oauth/api_scope"
+        "scope": "https://api.ebay.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -90,8 +91,7 @@ def ejecutar_freeze_diario():
         all_listings = []
         all_auctions = []
 
-        # Recorremos eBay rápidamente acumulando en memoria de forma ligera con bloques amplios
-        while offset < 2000: # Lote amplio y seguro para evitar timeout web
+        while offset < 2000:
             search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit={limit}&offset={offset}"
             response = requests.get(search_url, headers=headers)
             
@@ -139,7 +139,6 @@ def ejecutar_freeze_diario():
             offset += limit
             gc.collect()
 
-        # Inserción masiva optimizada en un solo golpe a Google Sheets (Mucho más rápido y sin timeouts)
         ws_listings.clear()
         ws_listings.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days"]])
         if all_listings:
