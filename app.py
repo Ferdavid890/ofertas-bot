@@ -54,7 +54,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://api.ebay.com/oauth/api_scope"
+        "scope": "https://oauth2.googleapis.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -125,6 +125,7 @@ def proceso_segundo_plano():
                         fecha_cierre_cdmx_str = dt_cdmx.strftime("%Y-%m-%d")
                         hora_cierre_formato = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
+                        # Filtro estricto: Solo guardamos las subastas que cierran HOY en CDMX
                         if fecha_cierre_cdmx_str == hoy_cdmx_str:
                             auctions_lote.append([
                                 item_id, "PSA 10", fecha_registro_actual, title, price, 0.0, hora_cierre_formato, "Pending", item_url
@@ -162,7 +163,7 @@ def ejecutar_freeze_diario():
     
     return jsonify({
         "status": "success",
-        "message": "Sincronización con enlaces iniciada en segundo plano con éxito."
+        "message": "Sincronización estricta de subastas de hoy iniciada en segundo plano con éxito."
     })
 
 if __name__ == "__main__":
