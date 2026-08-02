@@ -41,10 +41,6 @@ def obtener_token_ebay():
     client_secret = os.environ.get("EBAY_CLIENT_SECRET")
 
     if not client_id or not client_secret:
-    id = os.environ.get("EBAY_CLIENT_ID")
-    client_secret = os.environ.get("EBAY_CLIENT_SECRET")
-
-    if not client_id or not client_secret:
         raise Exception("Faltan las credenciales de eBay.")
 
     credentials = f"{client_id}:{client_secret}"
@@ -57,7 +53,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://oauth2.googleapis.com/oauth/api_scope"
+        "scope": "https://api.ebay.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -93,7 +89,7 @@ def ejecutar_freeze_diario():
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
         
         offset = 0
-        limit = 100  # Lote estándar optimizado
+        limit = 100
 
         while True:
             search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit={limit}&offset={offset}"
@@ -137,12 +133,11 @@ def ejecutar_freeze_diario():
                         item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1
                     ])
 
-            # Si el número de elementos devueltos es menor al límite, significa que llegamos al final de eBay
             if len(items) < limit:
                 break
 
             offset += limit
-            gc.collect() # Limpia memoria en cada salto de página
+            gc.collect()
 
         ws_listings.clear()
         ws_listings.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days"]])
