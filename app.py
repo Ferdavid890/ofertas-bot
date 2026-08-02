@@ -1,6 +1,6 @@
 import os
 import base64
-requests = __import__('requests')
+import requests
 from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify
 import gspread
@@ -143,7 +143,7 @@ def proceso_fondo():
         # FASE 2: SUBASTAS QUE CIERRAN HOY EN CDMX
         offset_auc = 0
         while offset_auc < 500:
-            auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{\{AUCTION\}}},priceCurrency:USD&limit=100&offset={offset_auc}"
+            auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
             response = requests.get(auction_url, headers=headers)
             
             if response.status_code != 200:
