@@ -57,7 +57,7 @@ def obtener_token_ebay():
         }
         body = {
             "grant_type": "client_credentials",
-            "scope": "https://oauth2.googleapis.com/oauth/api_scope"
+            "scope": "https://api.ebay.com/oauth/api_scope"
         }
 
         response = requests.post(url, headers=headers, data=body)
@@ -94,7 +94,6 @@ def ejecutar_freeze_diario():
         listings_data = []
         auctions_data = []
         
-        # Configurar zona horaria CDMX (UTC-6) de manera segura
         tz_cdmx = timezone(timedelta(hours=-6))
         ahora_cdmx = datetime.now(tz_cdmx)
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
@@ -128,14 +127,12 @@ def ejecutar_freeze_diario():
 
                 if "AUCTION" in buying_options and item_end_date_str:
                     try:
-                        # Convertir fecha de eBay a objeto datetime UTC y ajustar a CDMX
                         dt_utc = datetime.fromisoformat(item_end_date_str.replace("Z", "+00:00"))
                         dt_cdmx = dt_utc.astimezone(tz_cdmx)
                         
                         fecha_cierre_cdmx_str = dt_cdmx.strftime("%Y-%m-%d")
                         hora_cierre_formato = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-                        # Validar si cierra el día de hoy en CDMX
                         if fecha_cierre_cdmx_str == hoy_cdmx_str:
                             auctions_data.append([
                                 item_id, "PSA 10", fecha_registro_actual, title, price, 0.0, hora_cierre_formato, "Pending"
@@ -148,43 +145,7 @@ def ejecutar_freeze_diario():
                     ])
 
             offset += limit
-            if len(items) < limit:import os
-import base64
-import requests
-from datetime import datetime
-import zoneinfo
-from flask import Flask, jsonify
-import gspread
-from google.oauth2.service_account import Credentials
-
-app = Flask(__name__)
-
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
-SPREADSHEET_NAME = "Ebay_App"
-
-def conectar_sheets():
-    try:
-        client_email = os.environ.get("GOOGLE_CLIENT_EMAIL")
-        private_key = os.environ.get("GOOGLE_PRIVATE_KEY")
-        project_id = os.environ.get("GOOGLE_PROJECT_ID")
-
-        if not client_email or not private_key or not project_id:
-            return None
-
-        private_key = private_key.replace("\\n", "\n")
-        creds_info = {
-            "type": "service_account",
-            "project_id": project_id,
-            "private_key": private_key,
-            "client_email": client_email,
-            "token_uri": "https://oauth2.googleapis.com/token"
-        }
-
-        creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
-
+            if len(items) < limit:
                 break
 
         ws_listings.clear()
@@ -203,7 +164,6 @@ def conectar_sheets():
         })
 
     except Exception as e:
-        # Si ocurre cualquier error, ahora lo mostrará impreso claramente en el navegador en lugar de la página blanca
         return jsonify({"status": "error_critico", "detalle": str(e)}), 500
 
 if __name__ == "__main__":
