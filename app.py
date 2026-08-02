@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
+import threading
 import gc
 
 app = Flask(__name__)
@@ -52,9 +53,9 @@ def obtener_token_ebay():
         "Content-Type": "application/x-www-form-urlencoded",
         "Authorization": f"Basic {encoded_credentials}"
     }
+    # Se omite el scope para evitar errores de permisos en la Browse API pública
     body = {
-        "grant_type": "client_credentials",
-        "scope": "https://oauth.ebay.com/oauth/api_scope"
+        "grant_type": "client_credentials"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -63,12 +64,7 @@ def obtener_token_ebay():
     else:
         raise Exception(f"Error autenticando eBay: {response.text}")
 
-@app.route("/")
-def home():
-    return "Bot de eBay para Lorcana PSA 10 operando correctamente 🚀"
-
-@app.route("/ejecutar-freeze-diario", methods=["GET"])
-def ejecutar_freeze_diario():
+def proceso_fondo():
     try:
         sheet = conectar_sheets()
         token = obtener_token_ebay()
@@ -92,35 +88,142 @@ def ejecutar_freeze_diario():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Probamos primero con una sola capa para ver si escribe en el sheet de inmediato
-        search_url = "https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[0..100.00],priceCurrency:USD&limit=10"
-        response = requests.get(search_url, headers=headers)
-        
-        if response.status_code != 200:
-            return jsonify({"status": "error", "message": f"Error de eBay: {response.text}"})
+        # FASE 1: BARRIDA TOTAL DE BUY IT NOW (Capas de 100 en 100)
+        rangos_precios = [
+            ("0", "100.00"),
+            ("100.01", "200.00"),
+            ("200.01", "300.00"),
+            ("300.01", "400.00"),
+            ("400.01", "500.00"),
+            ("500.01", "600.00"),
+            ("600.01", "700.00"),
+            ("700.01", "800.00"),
+            ("800.01", "900.00"),
+            ("900.01", "1000.00"),
+            ("1000.01", "1100.00"),
+            ("1100.01", "1200.00"),
+            ("1200.01", "1300.00"),
+            ("1300.01", "1400.00"),
+            ("1400.01", "1500.00"),
+            ("1500.01", "1600.00"),
+            ("1600.01", "1700.00"),
+            ("1700.01", "1800.00"),
+            ("1800.01", "1900.00"),
+            ("1900.01", "2000.00"),
+            ("2000.01", "2500.00"),
+            ("2500.01", "3000.00"),
+            ("3000.01", "3500.00"),
+            ("3500.01", "4000.00"),
+            ("4000.01", "5000.00"),
+            ("5000.01", "99999999.00")
+        ]
 
-        data = response.json()
-        items = data.get("itemSummaries", [])
-        
-        listings_lote = []
-        for item in items:
-            item_id = item.get("itemId", "")
-            title = item.get("title", "")
-            item_url = item.get("itemWebUrl", "")
-            price_info = item.get("price", {})
-            price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
-            listings_lote.append([item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url])
+        for p_min, p_max in rangos_precios:
+            offset = 0
+            limit = 100
+            
+            while offset < 2000:
+                search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
+                response = requests.get(search_url, headers=headers)
+                
+                if response.status_code != 200:
+                    break
 
-        if listings_lote:
-            ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
+                data = response.json()
+                items = data.get("itemSummaries", [])
+                
+                if not items:
+                    break
 
-        return jsonify({
-            "status": "success",
-            "message": f"Prueba completada con éxito. Se insertaron {len(listings_lote)} registros de prueba en Google Sheets."
-        })
+                listings_lote = []
+                for item in items:
+                    buying_options = item.get("buyingOptions", [])
+                    if "FIXED_PRICE" in buying_options or "BUY_IT_NOW" in buying_options:
+                        item_id = item.get("itemId", "")
+                        title = item.get("title", "")
+                        item_url = item.get("itemWebUrl", "")
+                        price_info = item.get("price", {})
+                        price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
+
+                        listings_lote.append([
+                            item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url
+                        ])
+
+                if listings_lote:
+                    ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
+
+                if len(items) < limit:
+                    break
+
+                offset += limit
+                time.sleep(0.3)
+                gc.collect()
+
+        # FASE 2: BARRIDA TOTAL DE SUBASTAS QUE CIERRAN HOY EN CDMX
+        offset_auc = 0
+        while offset_auc < 2000:
+            auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
+            response = requests.get(auction_url, headers=headers)
+            
+            if response.status_code != 200:
+                break
+
+            data = response.json()
+            items = data.get("itemSummaries", [])
+            
+            if not items:
+                break
+
+            auctions_lote = []
+            for item in items:
+                item_end_time = item.get("itemEndDate", "")
+                if item_end_time:
+                    try:
+                        dt_utc = datetime.fromisoformat(item_end_time.replace("Z", "+00:00"))
+                        dt_cdmx = dt_utc.astimezone(tz_cdmx)
+                        fecha_cierre_cdmx_str = dt_cdmx.strftime("%Y-%m-%d")
+
+                        if fecha_cierre_cdmx_str == hoy_cdmx_str:
+                            item_id = item.get("itemId", "")
+                            title = item.get("title", "")
+                            item_url = item.get("itemWebUrl", "")
+                            
+                            price_info = item.get("price", {})
+                            current_bid = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
+                            
+                            cierre_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
+
+                            auctions_lote.append([
+                                item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, cierre_str, "Activa", item_url
+                            ])
+                    except Exception:
+                        continue
+
+            if auctions_lote:
+                ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
+
+            if len(items) < 100:
+                break
+
+            offset_auc += 100
+            time.sleep(0.3)
+            gc.collect()
 
     except Exception as e:
-        return jsonify({"status": "error", "detail": str(e)}), 500
+        print(f"Error en proceso de fondo: {str(e)}")
+
+@app.route("/")
+def home():
+    return "Bot de eBay para Lorcana PSA 10 operando correctamente 🚀"
+
+@app.route("/ejecutar-freeze-diario", methods=["GET"])
+def ejecutar_freeze_diario():
+    hilo = threading.Thread(target=proceso_fondo)
+    hilo.start()
+    return jsonify({
+        "status": "success",
+        "message": "Autenticación corregida. Sincronización total iniciada en segundo plano."
+    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
