@@ -53,7 +53,6 @@ def obtener_token_ebay():
         "Content-Type": "application/x-www-form-urlencoded",
         "Authorization": f"Basic {encoded_credentials}"
     }
-    # Sin el parámetro 'scope' para evitar que la API de eBay rechace la petición
     body = {
         "grant_type": "client_credentials"
     }
@@ -65,7 +64,6 @@ def obtener_token_ebay():
         raise Exception(f"Error autenticando eBay: {response.text}")
 
 def programar_captura_final(item_id, dt_cierre_objetivo):
-    """Función en segundo plano que espera hasta 60 segundos antes del cierre para actualizar el precio final."""
     try:
         ahora = datetime.now(timezone(timedelta(hours=-6)))
         diferencia_segundos = (dt_cierre_objetivo - ahora).total_seconds() - 60
@@ -118,11 +116,12 @@ def proceso_fondo():
         ws_listings = sheet.worksheet("Listings")
         ws_auctions = sheet.worksheet("Auctions")
 
-        if len(ws_listings.get_all_values()) == 0:
-            ws_listings.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days", "Link"]])
+        # Limpiamos las hojas antes de insertar los nuevos datos diarios para evitar duplicados
+        ws_listings.clear()
+        ws_auctions.clear()
 
-        if len(ws_auctions.get_all_values()) == 0:
-            ws_auctions.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "scheduled_closing_time", "status", "Link"]])
+        ws_listings.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days", "Link"]])
+        ws_auctions.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "scheduled_closing_time", "status", "Link"]])
 
         tz_cdmx = timezone(timedelta(hours=-6))
         ahora_cdmx = datetime.now(tz_cdmx)
@@ -176,8 +175,13 @@ def proceso_fondo():
                 gc.collect()
 
         if todos_los_listings:
-            ws_listings.append_rows(todos_los_listings, value_input_option='USER_ENTERED')
-            print(f"=== {len(todos_los_listings)} registros de Buy It Now insertados de golpe ===")
+            print(f"=== Insertando {len(todos_los_listings)} registros de Buy It Now en lotes ===")
+            # Dividir en bloques de 300 para no saturar la API de Google Sheets
+            tamano_lote = 300
+            for i in range(0, len(todos_los_listings), tamano_lote):
+                lote = todos_los_listings[i:i + tamano_lote]
+                ws_listings.append_rows(lote, value_input_option='USER_ENTERED')
+                time.sleep(1) # Pausa breve entre lotes
 
         print("=== Iniciando barrido de Subastas ===")
         offset_auc = 0
@@ -232,7 +236,7 @@ def proceso_fondo():
 
         if todas_las_subastas:
             ws_auctions.append_rows(todas_las_subastas, value_input_option='USER_ENTERED')
-            print(f"=== {len(todas_las_subastas)} subastas insertadas de golpe ===")
+            print(f"=== {len(todas_las_subastas)} subastas insertadas ===")
 
         for item_id, dt_cdmx in subastas_a_monitorear:
             hilo_monitoreo = threading.Thread(target=programar_captura_final, args=(item_id, dt_cdmx))
@@ -256,7 +260,7 @@ def ejecutar_freeze_diario():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Sincronización masiva por capas y monitoreo automático a 60s iniciados en segundo plano."
+        "message": "Sincronización masiva por lotes y monitoreo automático a 60s iniciados en segundo plano."
     })
 
 if __name__ == "__main__":
