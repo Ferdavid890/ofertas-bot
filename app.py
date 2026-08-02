@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
+from urllib.parse import quote
 import gc
 
 app = Flask(__name__)
@@ -74,8 +75,7 @@ def ejecutar_freeze_diario():
 
         headers = {
             "Authorization": f"Bearer {token}",
-            "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+            "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
         }
         
         ws_listings = sheet.worksheet("Listings")
@@ -92,12 +92,14 @@ def ejecutar_freeze_diario():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Probaremos la primera capa directamente en pantalla
-        search_url = "https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[0..100],priceCurrency:USD&limit=5"
+        # Filtro codificado de manera segura para evitar bloqueos de la API
+        filtro_precio = quote("price:[0..100],priceCurrency:USD")
+        search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter={filtro_precio}&limit=10"
+        
         response = requests.get(search_url, headers=headers)
         
         if response.status_code != 200:
-            return jsonify({"status": "error", "detail": f"Error eBay capa 0-100: {response.text}"})
+            return jsonify({"status": "error", "detail": f"Error eBay: {response.text}"})
 
         data = response.json()
         items = data.get("itemSummaries", [])
@@ -116,7 +118,7 @@ def ejecutar_freeze_diario():
 
         return jsonify({
             "status": "success",
-            "message": f"Prueba directa exitosa. Se insertaron {len(listings_lote)} elementos en Listings. Revisa tu Google Sheet."
+            "message": f"¡Conexión exitosa! Se insertaron {len(listings_lote)} elementos en Listings. Revisa tu Google Sheet."
         })
 
     except Exception as e:
