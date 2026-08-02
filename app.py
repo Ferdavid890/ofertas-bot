@@ -64,9 +64,46 @@ def obtener_token_ebay():
     else:
         raise Exception(f"Error autenticando eBay: {response.text}")
 
+def programar_captura_final(item_id, dt_cierre_objetivo):
+    """Función que espera hasta 60 segundos antes del cierre para consultar el precio final."""
+    try:
+        ahora = datetime.now(timezone(timedelta(hours=-6)))
+        diferencia_segundos = (dt_cierre_objetivo - ahora).total_seconds() - 60
+
+        if diferencia_segundos > 0:
+            time.sleep(diferencia_segundos)
+
+        token = obtener_token_ebay()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
+        }
+        
+        item_url = f"https://api.ebay.com/buy/browse/v1/item/{item_id}"
+        response = requests.get(item_url, headers=headers)
+
+        if response.status_code == 200:
+            item_data = response.json()
+            precio_final = 0.0
+            if "currentBidPrice" in item_data:
+                precio_final = float(item_data["currentBidPrice"].get("value", 0))
+            elif "price" in item_data:
+                precio_final = float(item_data["price"].get("value", 0))
+
+            sheet = conectar_sheets()
+            ws_auctions = sheet.worksheet("Auctions")
+            celda = ws_auctions.find(item_id)
+
+            if celda:
+                fila = celda.row
+                ws_auctions.update_cell(fila, 6, precio_final)
+                ws_auctions.update_cell(fila, 8, "Monitoreada 60s")
+    except Exception as e:
+        print(f"Error en temporizador para item {item_id}: {str(e)}")
+
 def proceso_fondo():
     try:
-        print("Iniciando proceso completo con capas de 50 y lectura correcta de subastas...")
+        print("Iniciando proceso completo en segundo plano...")
         sheet = conectar_sheets()
         token = obtener_token_ebay()
 
@@ -89,63 +126,31 @@ def proceso_fondo():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Capas ultra precisas de 50 en 50
+        # Rangos seguros con decimales para no perder ninguna carta
         rangos_precios = [
-            ("0", "50"),
-            ("51", "100"),
-            ("101", "150"),
-            ("151", "200"),
-            ("201", "250"),
-            ("251", "300"),
-            ("301", "350"),
-            ("351", "400"),
-            ("401", "450"),
-            ("451", "500"),
-            ("501", "550"),
-            ("551", "600"),
-            ("601", "650"),
-            ("651", "700"),
-            ("701", "750"),
-            ("751", "800"),
-            ("801", "850"),
-            ("851", "900"),
-            ("901", "950"),
-            ("951", "1000"),
-            ("1001", "1100"),
-            ("1101", "1200"),
-            ("1201", "1300"),
-            ("1301", "1400"),
-            ("1401", "1500"),
-            ("1501", "1600"),
-            ("1601", "1700"),
-            ("1701", "1800"),
-            ("1801", "1900"),
-            ("1901", "2000"),
-            ("2001", "2250"),
-            ("2251", "2500"),
-            ("2501", "2750"),
-            ("2751", "3000"),
-            ("3001", "3500"),
-            ("3501", "4000"),
-            ("4001", "5000"),
-            ("5001", "999999")
+            ("0", "50.99"), ("51", "100.99"), ("101", "150.99"), ("151", "200.99"),
+            ("201", "250.99"), ("251", "300.99"), ("301", "350.99"), ("351", "400.99"),
+            ("401", "450.99"), ("451", "500.99"), ("501", "550.99"), ("551", "600.99"),
+            ("601", "650.99"), ("651", "700.99"), ("701", "750.99"), ("751", "800.99"),
+            ("801", "850.99"), ("851", "900.99"), ("901", "950.99"), ("951", "1000.99"),
+            ("1001", "1100.99"), ("1101", "1200.99"), ("1201", "1300.99"), ("1301", "1400.99"),
+            ("1401", "1500.99"), ("1501", "1600.99"), ("1601", "1700.99"), ("1701", "1800.99"),
+            ("1801", "1900.99"), ("1901", "2000.99"), ("2001", "2250.99"), ("2251", "2500.99"),
+            ("2501", "2750.99"), ("2751", "3000.99"), ("3001", "3500.99"), ("3501", "4000.99"),
+            ("4001", "5000.99"), ("5001", "999999")
         ]
 
-        print("Barrido de Buy It Now por capas de 50 iniciado...")
+        # 1. Barrido de Buy It Now
         for p_min, p_max in rangos_precios:
             offset = 0
             limit = 100
-            
             while offset < 2000:
                 search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
                 response = requests.get(search_url, headers=headers)
-                
                 if response.status_code != 200:
                     break
-
                 data = response.json()
                 items = data.get("itemSummaries", [])
-                
                 if not items:
                     break
 
@@ -158,33 +163,25 @@ def proceso_fondo():
                         item_url = item.get("itemWebUrl", "")
                         price_info = item.get("price", {})
                         price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
-
-                        listings_lote.append([
-                            item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url
-                        ])
+                        listings_lote.append([item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url])
 
                 if listings_lote:
                     ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
-
                 if len(items) < limit:
                     break
-
                 offset += limit
                 time.sleep(0.3)
                 gc.collect()
 
-        print("Barrido de Subastas iniciado...")
+        # 2. Barrido de Subastas
         offset_auc = 0
         while offset_auc < 2000:
             auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
             response = requests.get(auction_url, headers=headers)
-            
             if response.status_code != 200:
                 break
-
             data = response.json()
             items = data.get("itemSummaries", [])
-            
             if not items:
                 break
 
@@ -202,7 +199,6 @@ def proceso_fondo():
                             title = item.get("title", "")
                             item_url = item.get("itemWebUrl", "")
                             
-                            # Extracción robusta del precio actual de la subasta
                             current_bid = 0.0
                             if "currentBidPrice" in item:
                                 current_bid = float(item["currentBidPrice"].get("value", 0))
@@ -214,6 +210,11 @@ def proceso_fondo():
                             auctions_lote.append([
                                 item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, cierre_str, "Activa", item_url
                             ])
+
+                            hilo_monitoreo = threading.Thread(target=programar_captura_final, args=(item_id, dt_cdmx))
+                            hilo_monitoreo.daemon = True
+                            hilo_monitoreo.start()
+
                     except Exception:
                         continue
 
@@ -222,12 +223,11 @@ def proceso_fondo():
 
             if len(items) < 100:
                 break
-
             offset_auc += 100
             time.sleep(0.3)
             gc.collect()
 
-        print("Sincronización total con capas de 50 y subastas corregidas finalizada con éxito.")
+        print("Sincronización total completada con éxito.")
 
     except Exception as e:
         print(f"Error crítico en proceso de fondo: {str(e)}")
@@ -242,7 +242,7 @@ def ejecutar_freeze_diario():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Sincronización masiva con capas de 50 y lectura correcta de subastas iniciada en segundo plano."
+        "message": "Sincronización masiva y monitoreo automático iniciados en segundo plano."
     })
 
 if __name__ == "__main__":
