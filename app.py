@@ -66,7 +66,7 @@ def obtener_token_ebay():
 
 def proceso_fondo():
     try:
-        print("Iniciando proceso completo con capas de 50 en segundo plano...")
+        print("Iniciando proceso completo con capas de 50 y lectura correcta de subastas...")
         sheet = conectar_sheets()
         token = obtener_token_ebay()
 
@@ -89,7 +89,7 @@ def proceso_fondo():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Nuevas capas de 50 en 50 para máxima precisión
+        # Capas ultra precisas de 50 en 50
         rangos_precios = [
             ("0", "50"),
             ("51", "100"),
@@ -202,8 +202,12 @@ def proceso_fondo():
                             title = item.get("title", "")
                             item_url = item.get("itemWebUrl", "")
                             
-                            price_info = item.get("price", {})
-                            current_bid = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
+                            # Extracción robusta del precio actual de la subasta
+                            current_bid = 0.0
+                            if "currentBidPrice" in item:
+                                current_bid = float(item["currentBidPrice"].get("value", 0))
+                            elif "price" in item:
+                                current_bid = float(item["price"].get("value", 0))
                             
                             cierre_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -223,7 +227,7 @@ def proceso_fondo():
             time.sleep(0.3)
             gc.collect()
 
-        print("Sincronización total con capas de 50 finalizada con éxito.")
+        print("Sincronización total con capas de 50 y subastas corregidas finalizada con éxito.")
 
     except Exception as e:
         print(f"Error crítico en proceso de fondo: {str(e)}")
@@ -238,7 +242,7 @@ def ejecutar_freeze_diario():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Sincronización masiva con capas de 50 en 50 iniciada en segundo plano correctamente."
+        "message": "Sincronización masiva con capas de 50 y lectura correcta de subastas iniciada en segundo plano."
     })
 
 if __name__ == "__main__":
