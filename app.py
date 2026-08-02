@@ -80,9 +80,13 @@ def ejecutar_freeze_diario():
         ws_listings = sheet.worksheet("Listings")
         ws_auctions = sheet.worksheet("Auctions")
 
-        listings_data = []
-        auctions_data = []
-        
+        # Limpiamos las hojas y dejamos los encabezados listos desde el inicio
+        ws_listings.clear()
+        ws_listings.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days"]])
+
+        ws_auctions.clear()
+        ws_auctions.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "scheduled_closing_time", "status"]])
+
         tz_cdmx = timezone(timedelta(hours=-6))
         ahora_cdmx = datetime.now(tz_cdmx)
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
@@ -90,6 +94,8 @@ def ejecutar_freeze_diario():
         
         offset = 0
         limit = 100
+        total_listings_procesados = 0
+        total_auctions_procesadas = 0
 
         while True:
             search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit={limit}&offset={offset}"
@@ -103,6 +109,9 @@ def ejecutar_freeze_diario():
             
             if not items:
                 break
+
+            listings_lote = []
+            auctions_lote = []
 
             for item in items:
                 item_id = item.get("itemId", "")
@@ -123,35 +132,35 @@ def ejecutar_freeze_diario():
                         hora_cierre_formato = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
                         if fecha_cierre_cdmx_str == hoy_cdmx_str:
-                            auctions_data.append([
+                            auctions_lote.append([
                                 item_id, "PSA 10", fecha_registro_actual, title, price, 0.0, hora_cierre_formato, "Pending"
                             ])
                     except Exception:
                         pass 
                 else:
-                    listings_data.append([
+                    listings_lote.append([
                         item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1
                     ])
 
+            # Subimos el lote actual directamente a Google Sheets para liberar memoria de inmediato
+            if listings_lote:
+                ws_listings.append_rows(listings_lote)
+                total_listings_procesados += len(listings_lote)
+
+            if auctions_lote:
+                ws_auctions.append_rows(auctions_lote)
+                total_auctions_procesadas += len(auctions_lote)
+
+            # Si el bloque devuelto es menor al límite, llegamos al final de eBay
             if len(items) < limit:
                 break
 
             offset += limit
-            gc.collect()
-
-        ws_listings.clear()
-        ws_listings.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days"]])
-        if listings_data:
-            ws_listings.append_rows(listings_data)
-
-        ws_auctions.clear()
-        ws_auctions.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "scheduled_closing_time", "status"]])
-        if auctions_data:
-            ws_auctions.append_rows(auctions_data)
+            gc.collect() # Forzar liberación de RAM en cada página
 
         return jsonify({
             "status": "success",
-            "message": f"Sincronización total completada. Buy It Now: {len(listings_data)}, Subastas cerrando hoy CDMX: {len(auctions_data)}"
+            "message": f"Sincronización masiva completa. Buy It Now totales: {total_listings_procesados}, Subastas cerrando hoy: {total_auctions_procesadas}"
         })
 
     except Exception as e:
