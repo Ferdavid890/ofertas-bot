@@ -55,7 +55,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://api.ebay.com/oauth/api_scope"
+        "scope": "https://oauth.ebay.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -235,6 +235,10 @@ def proceso_fondo():
 
     except Exception as e:
         print(f"Error crítico en proceso de fondo: {str(e)}")
+
+@app.route("/ping")
+def ping():
+    return "Pong! Servidor activo.", 200
 
 @app.route("/")
 def home():
