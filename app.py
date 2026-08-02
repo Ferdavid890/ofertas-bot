@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
+import threading
 import gc
 
 app = Flask(__name__)
@@ -62,12 +63,7 @@ def obtener_token_ebay():
     else:
         raise Exception(f"Error autenticando eBay: {response.text}")
 
-@app.route("/")
-def home():
-    return "Bot de eBay para Lorcana PSA 10 operando correctamente 🚀"
-
-@app.route("/ejecutar-freeze-diario", methods=["GET"])
-def ejecutar_freeze_diario():
+def proceso_segundo_plano():
     try:
         sheet = conectar_sheets()
         token = obtener_token_ebay()
@@ -93,10 +89,7 @@ def ejecutar_freeze_diario():
         
         offset = 0
         limit = 100
-        total_listings_procesados = 0
-        total_auctions_procesadas = 0
 
-        # Subimos el límite seguro hasta 5,000 o más escribiendo en bloques por lotes progresivos
         while offset < 5000:
             search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit={limit}&offset={offset}"
             response = requests.get(search_url, headers=headers)
@@ -142,14 +135,11 @@ def ejecutar_freeze_diario():
                         item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1
                     ])
 
-            # Inserción progresiva por cada página para evitar acumular tiempo de espera y memoria
             if listings_lote:
                 ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
-                total_listings_procesados += len(listings_lote)
 
             if auctions_lote:
                 ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
-                total_auctions_procesadas += len(auctions_lote)
 
             if len(items) < limit:
                 break
@@ -157,13 +147,23 @@ def ejecutar_freeze_diario():
             offset += limit
             gc.collect()
 
-        return jsonify({
-            "status": "success",
-            "message": f"Descarga masiva completa. Buy It Now: {total_listings_procesados}, Subastas: {total_auctions_procesadas}"
-        })
-
     except Exception as e:
-        return jsonify({"status": "error_critico", "detalle": str(e)}), 500
+        print(f"Error en segundo plano: {str(e)}")
+
+@app.route("/")
+def home():
+    return "Bot de eBay para Lorcana PSA 10 operando correctamente 🚀"
+
+@app.route("/ejecutar-freeze-diario", methods=["GET"])
+def ejecutar_freeze_diario():
+    # Lanza el proceso en segundo plano para evitar el timeout del navegador web
+    hilo = threading.Thread(target=proceso_segundo_plano)
+    hilo.start()
+    
+    return jsonify({
+        "status": "success",
+        "message": "Sincronización iniciada en segundo plano con éxito. Revisa tu Google Sheet en unos segundos para ver los registros."
+    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
