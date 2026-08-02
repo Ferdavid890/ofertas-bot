@@ -91,7 +91,7 @@ def ejecutar_freeze_diario():
         all_listings = []
         all_auctions = []
 
-        while offset < 2000:
+        while offset < 10000:
             search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit={limit}&offset={offset}"
             response = requests.get(search_url, headers=headers)
             
