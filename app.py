@@ -53,7 +53,7 @@ def obtener_token_ebay():
         "Content-Type": "application/x-www-form-urlencoded",
         "Authorization": f"Basic {encoded_credentials}"
     }
- body = {
+    body = {
         "grant_type": "client_credentials",
         "scope": "https://api.ebay.com/oauth/api_scope"
     }
@@ -73,14 +73,12 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
         if diferencia_segundos > 0:
             time.sleep(diferencia_segundos)
 
-        # Una vez llegado el momento, consultamos el precio actual en eBay
         token = obtener_token_ebay()
         headers = {
             "Authorization": f"Bearer {token}",
             "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
         }
         
-        # Consultamos el item individual usando la Browse API
         item_url = f"https://api.ebay.com/buy/browse/v1/item/{item_id}"
         response = requests.get(item_url, headers=headers)
 
@@ -92,14 +90,12 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
             elif "price" in item_data:
                 precio_final = float(item_data["price"].get("value", 0))
 
-            # Actualizamos Google Sheets en la fila correspondiente
             sheet = conectar_sheets()
             ws_auctions = sheet.worksheet("Auctions")
             celda = ws_auctions.find(item_id)
 
             if celda:
                 fila = celda.row
-                # Columna F es final_price_60s (Columna 6) y Columna H es status (Columna 8)
                 ws_auctions.update_cell(fila, 6, precio_final)
                 ws_auctions.update_cell(fila, 8, "Monitoreada 60s")
     except Exception as e:
@@ -143,7 +139,6 @@ def proceso_fondo():
             ("4001", "5000"), ("5001", "999999")
         ]
 
-        # 1. Barrido de Buy It Now por capas de precios
         for p_min, p_max in rangos_precios:
             offset = 0
             limit = 100
@@ -176,7 +171,6 @@ def proceso_fondo():
                 time.sleep(0.3)
                 gc.collect()
 
-        # 2. Barrido de Subastas y lanzamiento de temporizadores individuales
         offset_auc = 0
         while offset_auc < 2000:
             auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
@@ -214,7 +208,6 @@ def proceso_fondo():
                                 item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, cierre_str, "Activa", item_url
                             ])
 
-                            # Lanzamos un hilo temporizador independiente para vigilar este item exacto
                             hilo_monitoreo = threading.Thread(target=programar_captura_final, args=(item_id, dt_cdmx))
                             hilo_monitoreo.daemon = True
                             hilo_monitoreo.start()
