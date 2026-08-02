@@ -5,7 +5,6 @@ from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
-import threading
 import gc
 
 app = Flask(__name__)
@@ -63,7 +62,12 @@ def obtener_token_ebay():
     else:
         raise Exception(f"Error autenticando eBay: {response.text}")
 
-def proceso_segundo_plano():
+@app.route("/")
+def home():
+    return "Bot de eBay para Lorcana PSA 10 operando correctamente 🚀"
+
+@app.route("/ejecutar-freeze-diario", methods=["GET"])
+def ejecutar_freeze_diario():
     try:
         sheet = conectar_sheets()
         token = obtener_token_ebay()
@@ -76,7 +80,6 @@ def proceso_segundo_plano():
         ws_listings = sheet.worksheet("Listings")
         ws_auctions = sheet.worksheet("Auctions")
 
-        # Asegurar encabezados si las hojas están totalmente vacías
         if len(ws_listings.get_all_values()) == 0:
             ws_listings.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days", "Link"]])
 
@@ -88,9 +91,7 @@ def proceso_segundo_plano():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # ==========================================
         # FASE 1: BARRIDA DE BUY IT NOW POR LAS 9 CAPAS DE PRECIO
-        # ==========================================
         rangos_precios = [
             ("0", "500.00"),
             ("500.01", "1000.00"),
@@ -103,6 +104,7 @@ def proceso_segundo_plano():
             ("4000.01", "99999999.00")
         ]
 
+        total_listings = 0
         for p_min, p_max in rangos_precios:
             offset = 0
             limit = 100
@@ -121,14 +123,12 @@ def proceso_segundo_plano():
                     break
 
                 listings_lote = []
-
                 for item in items:
                     buying_options = item.get("buyingOptions", [])
                     if "FIXED_PRICE" in buying_options or "BUY_IT_NOW" in buying_options:
                         item_id = item.get("itemId", "")
                         title = item.get("title", "")
                         item_url = item.get("itemWebUrl", "")
-                        
                         price_info = item.get("price", {})
                         price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
 
@@ -138,6 +138,7 @@ def proceso_segundo_plano():
 
                 if listings_lote:
                     ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
+                    total_listings += len(listings_lote)
 
                 if len(items) < limit:
                     break
@@ -145,77 +146,16 @@ def proceso_segundo_plano():
                 offset += limit
                 gc.collect()
 
-        # ==========================================
-        # FASE 2: BARRIDA DE SUBASTAS QUE CIERRAN HOY
-        # ==========================================
-        offset_auc = 0
-        limit_auc = 100
-
-        while offset_auc < 2000:
-            response_auc = requests.get(f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit={limit_auc}&offset={offset_auc}", headers=headers)
-            
-            if response_auc.status_code != 200:
-                break
-
-            data_auc = response_auc.json()
-            items_auc = data_auc.get("itemSummaries", [])
-            
-            if not items_auc:
-                break
-
-            auctions_lote = []
-
-            for item in items_auc:
-                buying_options = item.get("buyingOptions", [])
-                item_end_date_str = item.get("itemEndDate", "")
-
-                if "AUCTION" in buying_options and item_end_date_str:
-                    try:
-                        dt_utc = datetime.fromisoformat(item_end_date_str.replace("Z", "+00:00"))
-                        dt_cdmx = dt_utc.astimezone(tz_cdmx)
-                        
-                        fecha_cierre_cdmx_str = dt_cdmx.strftime("%Y-%m-%d")
-                        hora_cierre_formato = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
-
-                        # Filtro estricto: Únicamente las subastas que cierran HOY en CDMX
-                        if fecha_cierre_cdmx_str == hoy_cdmx_str:
-                            item_id = item.get("itemId", "")
-                            title = item.get("title", "")
-                            item_url = item.get("itemWebUrl", "")
-                            price_info = item.get("price", {})
-                            price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
-
-                            auctions_lote.append([
-                                item_id, "PSA 10", fecha_registro_actual, title, price, 0.0, hora_cierre_formato, "Pending", item_url
-                            ])
-                    except Exception:
-                        pass 
-
-            if auctions_lote:
-                ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
-
-            if len(items_auc) < limit_auc:
-                break
-
-            offset_auc += limit_auc
-            gc.collect()
+        return jsonify({
+            "status": "success",
+            "message": f"Sincronización terminada directamente. Listings guardados: {total_listings}"
+        })
 
     except Exception as e:
-        print(f"Error en segundo plano: {str(e)}")
-
-@app.route("/")
-def home():
-    return "Bot de eBay para Lorcana PSA 10 optimizado con 9 capas operando correctamente 🚀"
-
-@app.route("/ejecutar-freeze-diario", methods=["GET"])
-def ejecutar_freeze_diario():
-    hilo = threading.Thread(target=proceso_segundo_plano)
-    hilo.start()
-    
-    return jsonify({
-        "status": "success",
-        "message": "Sincronización por 9 capas de precio y subastas de hoy iniciada con éxito."
-    })
+        return jsonify({
+            "status": "error",
+            "error_detallado": str(e)
+        }), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
