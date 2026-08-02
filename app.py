@@ -1,6 +1,7 @@
 import os
 import base64
 import requests
+import time
 from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify
 import gspread
@@ -54,7 +55,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://oauth2.googleapis.com/oauth/api_scope"
+        "scope": "https://oauth.ebay.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -65,6 +66,7 @@ def obtener_token_ebay():
 
 def proceso_fondo():
     try:
+        print("Iniciando conexión con Google Sheets y eBay...")
         sheet = conectar_sheets()
         token = obtener_token_ebay()
 
@@ -87,7 +89,6 @@ def proceso_fondo():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # FASE 1: BARRIDA TOTAL DE BUY IT NOW (Capas de 100 en 100)
         rangos_precios = [
             ("0", "100.00"),
             ("100.01", "200.00"),
@@ -117,6 +118,7 @@ def proceso_fondo():
             ("5000.01", "99999999.00")
         ]
 
+        print("Iniciando barrido de Buy It Now por capas...")
         for p_min, p_max in rangos_precios:
             offset = 0
             limit = 100
@@ -126,6 +128,7 @@ def proceso_fondo():
                 response = requests.get(search_url, headers=headers)
                 
                 if response.status_code != 200:
+                    print(f"Error en rango {p_min}-{p_max}: {response.text}")
                     break
 
                 data = response.json()
@@ -155,9 +158,10 @@ def proceso_fondo():
                     break
 
                 offset += limit
+                time.sleep(0.3)  # Pequeña pausa para no saturar la API de eBay
                 gc.collect()
 
-        # FASE 2: BARRIDA TOTAL DE SUBASTAS QUE CIERRAN HOY EN CDMX
+        print("Iniciando barrido de Subastas...")
         offset_auc = 0
         while offset_auc < 2000:
             auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
@@ -204,10 +208,13 @@ def proceso_fondo():
                 break
 
             offset_auc += 100
+            time.sleep(0.3)
             gc.collect()
 
+        print("Sincronización total finalizada con éxito.")
+
     except Exception as e:
-        print(f"Error en proceso de fondo: {str(e)}")
+        print(f"Error crítico en proceso de fondo: {str(e)}")
 
 @app.route("/")
 def home():
@@ -219,7 +226,7 @@ def ejecutar_freeze_diario():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Sincronización total con capas de 100 en 100 iniciada en segundo plano."
+        "message": "Sincronización optimizada iniciada en segundo plano con pausas de seguridad."
     })
 
 if __name__ == "__main__":
