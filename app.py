@@ -6,7 +6,6 @@ from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
-from urllib.parse import quote
 import gc
 
 app = Flask(__name__)
@@ -89,14 +88,17 @@ def ejecutar_freeze_diario():
 
         tz_cdmx = timezone(timedelta(hours=-6))
         ahora_cdmx = datetime.now(tz_cdmx)
-        hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Filtro codificado de manera segura para evitar bloqueos de la API
-        filtro_precio = quote("price:[0..100],priceCurrency:USD")
-        search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter={filtro_precio}&limit=10"
+        # Usamos un diccionario de parámetros para que requests maneje la URL de forma impecable
+        search_url = "https://api.ebay.com/buy/browse/v1/item_summary/search"
+        params = {
+            "q": "Lorcana PSA 10",
+            "filter": "price:[0..100],priceCurrency:USD",
+            "limit": 10
+        }
         
-        response = requests.get(search_url, headers=headers)
+        response = requests.get(search_url, headers=headers, params=params)
         
         if response.status_code != 200:
             return jsonify({"status": "error", "detail": f"Error eBay: {response.text}"})
@@ -118,7 +120,7 @@ def ejecutar_freeze_diario():
 
         return jsonify({
             "status": "success",
-            "message": f"¡Conexión exitosa! Se insertaron {len(listings_lote)} elementos en Listings. Revisa tu Google Sheet."
+            "message": f"¡Conexión y consulta exitosas! Se insertaron {len(listings_lote)} elementos. Revisa tu Google Sheet."
         })
 
     except Exception as e:
