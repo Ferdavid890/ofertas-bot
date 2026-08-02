@@ -1,12 +1,9 @@
 import os
 import base64
 import requests
-import time
-from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
-import gc
 
 app = Flask(__name__)
 
@@ -64,7 +61,7 @@ def obtener_token_ebay():
 
 @app.route("/")
 def home():
-    return "Bot de eBay para Lorcana PSA 10 operando correctamente 🚀"
+    return "Bot de eBay operando correctamente 🚀"
 
 @app.route("/ejecutar-freeze-diario", methods=["GET"])
 def ejecutar_freeze_diario():
@@ -78,30 +75,13 @@ def ejecutar_freeze_diario():
         }
         
         ws_listings = sheet.worksheet("Listings")
-        ws_auctions = sheet.worksheet("Auctions")
 
-        if len(ws_listings.get_all_values()) == 0:
-            ws_listings.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days", "Link"]])
-
-        if len(ws_auctions.get_all_values()) == 0:
-            ws_auctions.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "scheduled_closing_time", "status", "Link"]])
-
-        tz_cdmx = timezone(timedelta(hours=-6))
-        ahora_cdmx = datetime.now(tz_cdmx)
-        fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
-
-        # Usamos un diccionario de parámetros para que requests maneje la URL de forma impecable
-        search_url = "https://api.ebay.com/buy/browse/v1/item_summary/search"
-        params = {
-            "q": "Lorcana PSA 10",
-            "filter": "price:[0..100],priceCurrency:USD",
-            "limit": 10
-        }
-        
-        response = requests.get(search_url, headers=headers, params=params)
+        # Petición completamente limpia SIN filtros de precios para aislar el error
+        search_url = "https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit=5"
+        response = requests.get(search_url, headers=headers)
         
         if response.status_code != 200:
-            return jsonify({"status": "error", "detail": f"Error eBay: {response.text}"})
+            return jsonify({"status": "error", "detail": f"Error eBay sin filtro: {response.text}"})
 
         data = response.json()
         items = data.get("itemSummaries", [])
@@ -113,14 +93,14 @@ def ejecutar_freeze_diario():
             item_url = item.get("itemWebUrl", "")
             price_info = item.get("price", {})
             price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
-            listings_lote.append([item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url])
+            listings_lote.append([item_id, "PSA 10", "2026-08-02", title, price, "Buy It Now", price, 1, item_url])
 
         if listings_lote:
             ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
 
         return jsonify({
             "status": "success",
-            "message": f"¡Conexión y consulta exitosas! Se insertaron {len(listings_lote)} elementos. Revisa tu Google Sheet."
+            "message": f"¡Éxito total! Se insertaron {len(listings_lote)} elementos sin filtros. Revisa tu Google Sheet."
         })
 
     except Exception as e:
