@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
+import traceback
 
 app = Flask(__name__)
 
@@ -15,58 +16,51 @@ SCOPES = [
 SPREADSHEET_NAME = "Ebay_App"
 
 def conectar_sheets():
-    try:
-        client_email = os.environ.get("GOOGLE_CLIENT_EMAIL")
-        private_key = os.environ.get("GOOGLE_PRIVATE_KEY")
-        project_id = os.environ.get("GOOGLE_PROJECT_ID")
+    client_email = os.environ.get("GOOGLE_CLIENT_EMAIL")
+    private_key = os.environ.get("GOOGLE_PRIVATE_KEY")
+    project_id = os.environ.get("GOOGLE_PROJECT_ID")
 
-        if not client_email or not private_key or not project_id:
-            return None
+    if not client_email or not private_key or not project_id:
+        raise Exception("Faltan variables de entorno de Google Sheets en Render.")
 
-        private_key = private_key.replace("\\n", "\n")
-        creds_info = {
-            "type": "service_account",
-            "project_id": project_id,
-            "private_key": private_key,
-            "client_email": client_email,
-            "token_uri": "https://oauth2.googleapis.com/token"
-        }
+    private_key = private_key.replace("\\n", "\n")
+    creds_info = {
+        "type": "service_account",
+        "project_id": project_id,
+        "private_key": private_key,
+        "client_email": client_email,
+        "token_uri": "https://oauth2.googleapis.com/token"
+    }
 
-        creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
-        client = gspread.authorize(creds)
-        return client.open(SPREADSHEET_NAME)
-    except Exception as e:
-        print(f"Error conectando a Sheets: {e}")
-        return None
+    creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+    client = gspread.authorize(creds)
+    return client.open(SPREADSHEET_NAME)
 
 def obtener_token_ebay():
-    try:
-        client_id = os.environ.get("EBAY_CLIENT_ID")
-        client_secret = os.environ.get("EBAY_CLIENT_SECRET")
+    client_id = os.environ.get("EBAY_CLIENT_ID")
+    client_secret = os.environ.get("EBAY_CLIENT_SECRET")
 
-        if not client_id or not client_secret:
-            return None
+    if not client_id or not client_secret:
+        raise Exception("Faltan las credenciales de eBay en las variables de entorno de Render.")
 
-        credentials = f"{client_id}:{client_secret}"
-        encoded_credentials = base64.b64encode(credentials.encode()).decode()
+    credentials = f"{client_id}:{client_secret}"
+    encoded_credentials = base64.b64encode(credentials.encode()).decode()
 
-        url = "https://api.ebay.com/identity/v1/oauth2/token"
-        headers = {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Authorization": f"Basic {encoded_credentials}"
-        }
-        body = {
-            "grant_type": "client_credentials",
-            "scope": "https://api.ebay.com/oauth/api_scope"
-        }
+    url = "https://api.ebay.com/identity/v1/oauth2/token"
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": f"Basic {encoded_credentials}"
+    }
+    body = {
+        "grant_type": "client_credentials",
+        "scope": "https://api.ebay.com/oauth/api_scope"
+    }
 
-        response = requests.post(url, headers=headers, data=body)
-        if response.status_code == 200:
-            return response.json().get("access_token")
-        else:
-            return None
-    except Exception:
-        return None
+    response = requests.post(url, headers=headers, data=body)
+    if response.status_code == 200:
+        return response.json().get("access_token")
+    else:
+        raise Exception(f"Error de autenticación con eBay: {response.status_code} - {response.text}")
 
 @app.route("/")
 def home():
@@ -76,12 +70,7 @@ def home():
 def ejecutar_freeze_diario():
     try:
         sheet = conectar_sheets()
-        if not sheet:
-            return jsonify({"status": "error", "message": "No se pudo conectar a Google Sheets."}), 500
-
         token = obtener_token_ebay()
-        if not token:
-            return jsonify({"status": "error", "message": "No se pudo autenticar con la API de eBay."}), 500
 
         headers = {
             "Authorization": f"Bearer {token}",
@@ -107,7 +96,7 @@ def ejecutar_freeze_diario():
             response = requests.get(search_url, headers=headers)
             
             if response.status_code != 200:
-                break
+                raise Exception(f"Error consultando la API de eBay: {response.status_code} - {response.text}")
 
             data = response.json()
             items = data.get("itemSummaries", [])
@@ -164,7 +153,9 @@ def ejecutar_freeze_diario():
         })
 
     except Exception as e:
-        return jsonify({"status": "error_critico", "detalle": str(e)}), 500
+        # Esto imprimirá el error técnico completo en texto plano dentro de la página web
+        error_detallado = traceback.format_exc()
+        return f"<pre>{error_detallado}</pre>", 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
