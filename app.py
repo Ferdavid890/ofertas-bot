@@ -77,10 +77,10 @@ def proceso_segundo_plano():
         ws_auctions = sheet.worksheet("Auctions")
 
         ws_listings.clear()
-        ws_listings.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days"]])
+        ws_listings.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days", "Link"]])
 
         ws_auctions.clear()
-        ws_auctions.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "scheduled_closing_time", "status"]])
+        ws_auctions.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "scheduled_closing_time", "status", "Link"]])
 
         tz_cdmx = timezone(timedelta(hours=-6))
         ahora_cdmx = datetime.now(tz_cdmx)
@@ -109,6 +109,7 @@ def proceso_segundo_plano():
             for item in items:
                 item_id = item.get("itemId", "")
                 title = item.get("title", "")
+                item_url = item.get("itemWebUrl", "")
                 
                 price_info = item.get("price", {})
                 price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
@@ -126,13 +127,13 @@ def proceso_segundo_plano():
 
                         if fecha_cierre_cdmx_str == hoy_cdmx_str:
                             auctions_lote.append([
-                                item_id, "PSA 10", fecha_registro_actual, title, price, 0.0, hora_cierre_formato, "Pending"
+                                item_id, "PSA 10", fecha_registro_actual, title, price, 0.0, hora_cierre_formato, "Pending", item_url
                             ])
                     except Exception:
                         pass 
                 else:
                     listings_lote.append([
-                        item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1
+                        item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url
                     ])
 
             if listings_lote:
@@ -156,13 +157,12 @@ def home():
 
 @app.route("/ejecutar-freeze-diario", methods=["GET"])
 def ejecutar_freeze_diario():
-    # Lanza el proceso en segundo plano para evitar el timeout del navegador web
     hilo = threading.Thread(target=proceso_segundo_plano)
     hilo.start()
     
     return jsonify({
         "status": "success",
-        "message": "Sincronización iniciada en segundo plano con éxito. Revisa tu Google Sheet en unos segundos para ver los registros."
+        "message": "Sincronización con enlaces iniciada en segundo plano con éxito."
     })
 
 if __name__ == "__main__":
