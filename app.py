@@ -107,7 +107,7 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
 
 def proceso_fondo():
     try:
-        print("Iniciando proceso completo con capas de 50 y monitoreo de 60 segundos...")
+        print("Iniciando proceso completo con capas de precios y monitoreo de 60 segundos...")
         sheet = conectar_sheets()
         token = obtener_token_ebay()
 
@@ -143,7 +143,7 @@ def proceso_fondo():
             ("4001", "5000"), ("5001", "999999")
         ]
 
-        # 1. Barrido de Buy It Now
+        # 1. Barrido de Buy It Now por capas de precios
         for p_min, p_max in rangos_precios:
             offset = 0
             limit = 100
@@ -176,7 +176,7 @@ def proceso_fondo():
                 time.sleep(0.3)
                 gc.collect()
 
-        # 2. Barrido de Subastas y lanzamiento de temporizadores
+        # 2. Barrido de Subastas y lanzamiento de temporizadores individuales
         offset_auc = 0
         while offset_auc < 2000:
             auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
