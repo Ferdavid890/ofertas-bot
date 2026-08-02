@@ -51,9 +51,10 @@ def obtener_token_ebay():
         "Content-Type": "application/x-www-form-urlencoded",
         "Authorization": f"Basic {encoded_credentials}"
     }
+    # Corregido: El scope correcto para la API de Browse de eBay
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://oauth2.googleapis.com/oauth/api_scope"
+        "scope": "https://api.ebay.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -88,7 +89,6 @@ def ejecutar_freeze_diario():
 
         tz_cdmx = timezone(timedelta(hours=-6))
         ahora_cdmx = datetime.now(tz_cdmx)
-        hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
         # FASE 1: BARRIDA DE BUY IT NOW POR LAS 9 CAPAS DE PRECIO
@@ -148,7 +148,7 @@ def ejecutar_freeze_diario():
 
         return jsonify({
             "status": "success",
-            "message": f"Sincronización terminada directamente. Listings guardados: {total_listings}"
+            "message": f"Sincronización terminada con éxito. Listings guardados: {total_listings}"
         })
 
     except Exception as e:
