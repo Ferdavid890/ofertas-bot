@@ -49,8 +49,10 @@ def obtener_token_ebay():
         "Content-Type": "application/x-www-form-urlencoded",
         "Authorization": f"Basic {encoded_credentials}"
     }
+    # Forzamos el scope correcto de la Browse API para que el token tenga el permiso exacto
     body = {
-        "grant_type": "client_credentials"
+        "grant_type": "client_credentials",
+        "scope": "https://api.ebay.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -76,12 +78,11 @@ def ejecutar_freeze_diario():
         
         ws_listings = sheet.worksheet("Listings")
 
-        # Petición completamente limpia SIN filtros de precios para aislar el error
         search_url = "https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit=5"
         response = requests.get(search_url, headers=headers)
         
         if response.status_code != 200:
-            return jsonify({"status": "error", "detail": f"Error eBay sin filtro: {response.text}"})
+            return jsonify({"status": "error", "detail": f"Error eBay: {response.text}"})
 
         data = response.json()
         items = data.get("itemSummaries", [])
@@ -100,7 +101,7 @@ def ejecutar_freeze_diario():
 
         return jsonify({
             "status": "success",
-            "message": f"¡Éxito total! Se insertaron {len(listings_lote)} elementos sin filtros. Revisa tu Google Sheet."
+            "message": f"¡Token con scope correcto! Se insertaron {len(listings_lote)} elementos. Revisa tu Google Sheet."
         })
 
     except Exception as e:
