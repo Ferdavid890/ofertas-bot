@@ -1,12 +1,12 @@
 import os
 import base64
-import requests
+requests = __import__('requests')
 from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
+import threading
 import gc
-import sys
 
 app = Flask(__name__)
 
@@ -63,24 +63,145 @@ def obtener_token_ebay():
     else:
         raise Exception(f"Error autenticando eBay: {response.text}")
 
+def proceso_fondo():
+    try:
+        sheet = conectar_sheets()
+        token = obtener_token_ebay()
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
+        }
+        
+        ws_listings = sheet.worksheet("Listings")
+        ws_auctions = sheet.worksheet("Auctions")
+
+        if len(ws_listings.get_all_values()) == 0:
+            ws_listings.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days", "Link"]])
+
+        if len(ws_auctions.get_all_values()) == 0:
+            ws_auctions.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "scheduled_closing_time", "status", "Link"]])
+
+        tz_cdmx = timezone(timedelta(hours=-6))
+        ahora_cdmx = datetime.now(tz_cdmx)
+        hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
+        fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
+
+        # FASE 1: BARRIDA DE BUY IT NOW POR LAS 9 CAPAS DE PRECIO
+        rangos_precios = [
+            ("0", "500.00"),
+            ("500.01", "1000.00"),
+            ("1000.01", "1500.00"),
+            ("1500.01", "2000.00"),
+            ("2000.01", "2500.00"),
+            ("2500.01", "3000.00"),
+            ("3000.01", "3500.00"),
+            ("3500.01", "4000.00"),
+            ("4000.01", "99999999.00")
+        ]
+
+        for p_min, p_max in rangos_precios:
+            offset = 0
+            limit = 100
+            
+            while offset < 1000:
+                search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
+                response = requests.get(search_url, headers=headers)
+                
+                if response.status_code != 200:
+                    break
+
+                data = response.json()
+                items = data.get("itemSummaries", [])
+                
+                if not items:
+                    break
+
+                listings_lote = []
+                for item in items:
+                    buying_options = item.get("buyingOptions", [])
+                    if "FIXED_PRICE" in buying_options or "BUY_IT_NOW" in buying_options:
+                        item_id = item.get("itemId", "")
+                        title = item.get("title", "")
+                        item_url = item.get("itemWebUrl", "")
+                        price_info = item.get("price", {})
+                        price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
+
+                        listings_lote.append([
+                            item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url
+                        ])
+
+                if listings_lote:
+                    ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
+
+                if len(items) < limit:
+                    break
+
+                offset += limit
+                gc.collect()
+
+        # FASE 2: SUBASTAS QUE CIERRAN HOY EN CDMX
+        offset_auc = 0
+        while offset_auc < 500:
+            auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{\{AUCTION\}}},priceCurrency:USD&limit=100&offset={offset_auc}"
+            response = requests.get(auction_url, headers=headers)
+            
+            if response.status_code != 200:
+                break
+
+            data = response.json()
+            items = data.get("itemSummaries", [])
+            
+            if not items:
+                break
+
+            auctions_lote = []
+            for item in items:
+                item_end_time = item.get("itemEndDate", "")
+                if item_end_time:
+                    try:
+                        dt_utc = datetime.fromisoformat(item_end_time.replace("Z", "+00:00"))
+                        dt_cdmx = dt_utc.astimezone(tz_cdmx)
+                        fecha_cierre_cdmx_str = dt_cdmx.strftime("%Y-%m-%d")
+
+                        if fecha_cierre_cdmx_str == hoy_cdmx_str:
+                            item_id = item.get("itemId", "")
+                            title = item.get("title", "")
+                            item_url = item.get("itemWebUrl", "")
+                            price_info = item.get("price", {})
+                            price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
+                            cierre_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
+
+                            auctions_lote.append([
+                                item_id, "PSA 10", fecha_registro_actual, title, price, 0.0, cierre_str, "Activa", item_url
+                            ])
+                    except Exception:
+                        continue
+
+            if auctions_lote:
+                ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
+
+            if len(items) < 100:
+                break
+
+            offset_auc += 100
+            gc.collect()
+
+    except Exception as e:
+        print(f"Error en proceso de fondo: {str(e)}")
+
 @app.route("/")
 def home():
     return "Bot de eBay para Lorcana PSA 10 operando correctamente 🚀"
 
 @app.route("/ejecutar-freeze-diario", methods=["GET"])
 def ejecutar_freeze_diario():
-    try:
-        sheet = conectar_sheets()
-        token = obtener_token_ebay()
-        return jsonify({"status": "success", "message": "Conexión exitosa con Sheets y Token de eBay obtenido correctamente."})
-    except Exception as e:
-        exc_type, exc_obj, exc_tb = sys.exc_info()
-        linea = exc_tb.tb_lineno
-        return jsonify({
-            "status": "error",
-            "error": str(e),
-            "linea": linea
-        }), 500
+    hilo = threading.Thread(target=proceso_fondo)
+    hilo.start()
+    return jsonify({
+        "status": "success",
+        "message": "Sincronización por 9 capas de precio y subastas de hoy iniciada con éxito en segundo plano."
+    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
