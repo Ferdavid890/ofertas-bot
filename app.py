@@ -87,7 +87,7 @@ def proceso_fondo():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # FASE 1: BARRIDA DE BUY IT NOW POR LAS 9 CAPAS DE PRECIO
+        # FASE 1: BARRIDA TOTAL DE BUY IT NOW POR LAS 9 CAPAS DE PRECIO (Sin límite artificial de 1000)
         rangos_precios = [
             ("0", "500.00"),
             ("500.01", "1000.00"),
@@ -104,7 +104,7 @@ def proceso_fondo():
             offset = 0
             limit = 100
             
-            while offset < 1000:
+            while offset < 2000:  # Límite técnico máximo permitido por la API de eBay por consulta
                 search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
                 response = requests.get(search_url, headers=headers)
                 
@@ -134,15 +134,16 @@ def proceso_fondo():
                 if listings_lote:
                     ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
 
+                # Si trajo menos de 100 elementos, significa que llegamos al final de este rango de precios
                 if len(items) < limit:
                     break
 
                 offset += limit
                 gc.collect()
 
-        # FASE 2: SUBASTAS QUE CIERRAN HOY EN CDMX
+        # FASE 2: BARRIDA TOTAL DE SUBASTAS QUE CIERRAN HOY EN CDMX (Paginación completa)
         offset_auc = 0
-        while offset_auc < 500:
+        while offset_auc < 2000:
             auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
             response = requests.get(auction_url, headers=headers)
             
@@ -168,12 +169,15 @@ def proceso_fondo():
                             item_id = item.get("itemId", "")
                             title = item.get("title", "")
                             item_url = item.get("itemWebUrl", "")
+                            
+                            # Capturamos correctamente el precio actual de puja (evitando que quede en 0)
                             price_info = item.get("price", {})
-                            price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
+                            current_bid = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
+                            
                             cierre_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
                             auctions_lote.append([
-                                item_id, "PSA 10", fecha_registro_actual, title, price, 0.0, cierre_str, "Activa", item_url
+                                item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, cierre_str, "Activa", item_url
                             ])
                     except Exception:
                         continue
@@ -200,7 +204,7 @@ def ejecutar_freeze_diario():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Sincronización por 9 capas de precio y subastas de hoy iniciada con éxito en segundo plano."
+        "message": "Sincronización total iniciada en segundo plano con cobertura completa."
     })
 
 if __name__ == "__main__":
