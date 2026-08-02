@@ -76,44 +76,96 @@ def proceso_segundo_plano():
         ws_listings = sheet.worksheet("Listings")
         ws_auctions = sheet.worksheet("Auctions")
 
-        ws_listings.clear()
-        ws_listings.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days", "Link"]])
+        # Asegurar encabezados si las hojas están totalmente vacías
+        if len(ws_listings.get_all_values()) == 0:
+            ws_listings.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days", "Link"]])
 
-        ws_auctions.clear()
-        ws_auctions.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "scheduled_closing_time", "status", "Link"]])
+        if len(ws_auctions.get_all_values()) == 0:
+            ws_auctions.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "scheduled_closing_time", "status", "Link"]])
 
         tz_cdmx = timezone(timedelta(hours=-6))
         ahora_cdmx = datetime.now(tz_cdmx)
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
-        
-        offset = 0
-        limit = 100
 
-        while offset < 5000:
-            search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit={limit}&offset={offset}"
-            response = requests.get(search_url, headers=headers)
+        # ==========================================
+        # FASE 1: BARRIDA DE BUY IT NOW POR LAS 9 CAPAS DE PRECIO
+        # ==========================================
+        rangos_precios = [
+            ("0", "500.00"),
+            ("500.01", "1000.00"),
+            ("1000.01", "1500.00"),
+            ("1500.01", "2000.00"),
+            ("2000.01", "2500.00"),
+            ("2500.01", "3000.00"),
+            ("3000.01", "3500.00"),
+            ("3500.01", "4000.00"),
+            ("4000.01", "99999999.00")
+        ]
+
+        for p_min, p_max in rangos_precios:
+            offset = 0
+            limit = 100
             
-            if response.status_code != 200:
+            while offset < 2000:
+                search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
+                response = requests.get(search_url, headers=headers)
+                
+                if response.status_code != 200:
+                    break
+
+                data = response.json()
+                items = data.get("itemSummaries", [])
+                
+                if not items:
+                    break
+
+                listings_lote = []
+
+                for item in items:
+                    buying_options = item.get("buyingOptions", [])
+                    if "FIXED_PRICE" in buying_options or "BUY_IT_NOW" in buying_options:
+                        item_id = item.get("itemId", "")
+                        title = item.get("title", "")
+                        item_url = item.get("itemWebUrl", "")
+                        
+                        price_info = item.get("price", {})
+                        price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
+
+                        listings_lote.append([
+                            item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url
+                        ])
+
+                if listings_lote:
+                    ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
+
+                if len(items) < limit:
+                    break
+
+                offset += limit
+                gc.collect()
+
+        # ==========================================
+        # FASE 2: BARRIDA DE SUBASTAS QUE CIERRAN HOY
+        # ==========================================
+        offset_auc = 0
+        limit_auc = 100
+
+        while offset_auc < 2000:
+            response_auc = requests.get(f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit={limit_auc}&offset={offset_auc}", headers=headers)
+            
+            if response_auc.status_code != 200:
                 break
 
-            data = response.json()
-            items = data.get("itemSummaries", [])
+            data_auc = response_auc.json()
+            items_auc = data_auc.get("itemSummaries", [])
             
-            if not items:
+            if not items_auc:
                 break
 
-            listings_lote = []
             auctions_lote = []
 
-            for item in items:
-                item_id = item.get("itemId", "")
-                title = item.get("title", "")
-                item_url = item.get("itemWebUrl", "")
-                
-                price_info = item.get("price", {})
-                price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
-                
+            for item in items_auc:
                 buying_options = item.get("buyingOptions", [])
                 item_end_date_str = item.get("itemEndDate", "")
 
@@ -125,28 +177,27 @@ def proceso_segundo_plano():
                         fecha_cierre_cdmx_str = dt_cdmx.strftime("%Y-%m-%d")
                         hora_cierre_formato = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-                        # Filtro estricto: Solo guardamos las subastas que cierran HOY en CDMX
+                        # Filtro estricto: Únicamente las subastas que cierran HOY en CDMX
                         if fecha_cierre_cdmx_str == hoy_cdmx_str:
+                            item_id = item.get("itemId", "")
+                            title = item.get("title", "")
+                            item_url = item.get("itemWebUrl", "")
+                            price_info = item.get("price", {})
+                            price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
+
                             auctions_lote.append([
                                 item_id, "PSA 10", fecha_registro_actual, title, price, 0.0, hora_cierre_formato, "Pending", item_url
                             ])
                     except Exception:
                         pass 
-                else:
-                    listings_lote.append([
-                        item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url
-                    ])
-
-            if listings_lote:
-                ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
 
             if auctions_lote:
                 ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
 
-            if len(items) < limit:
+            if len(items_auc) < limit_auc:
                 break
 
-            offset += limit
+            offset_auc += limit_auc
             gc.collect()
 
     except Exception as e:
@@ -154,7 +205,7 @@ def proceso_segundo_plano():
 
 @app.route("/")
 def home():
-    return "Bot de eBay para Lorcana PSA 10 operando correctamente 🚀"
+    return "Bot de eBay para Lorcana PSA 10 optimizado con 9 capas operando correctamente 🚀"
 
 @app.route("/ejecutar-freeze-diario", methods=["GET"])
 def ejecutar_freeze_diario():
@@ -163,7 +214,7 @@ def ejecutar_freeze_diario():
     
     return jsonify({
         "status": "success",
-        "message": "Sincronización estricta de subastas de hoy iniciada en segundo plano con éxito."
+        "message": "Sincronización por 9 capas de precio y subastas de hoy iniciada con éxito."
     })
 
 if __name__ == "__main__":
