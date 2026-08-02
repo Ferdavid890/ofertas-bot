@@ -51,7 +51,6 @@ def obtener_token_ebay():
         "Content-Type": "application/x-www-form-urlencoded",
         "Authorization": f"Basic {encoded_credentials}"
     }
-    # Corregido: El scope correcto para la API de eBay Buy/Browse
     body = {
         "grant_type": "client_credentials",
         "scope": "https://api.ebay.com/oauth/api_scope"
@@ -81,6 +80,12 @@ def ejecutar_freeze_diario():
         ws_listings = sheet.worksheet("Listings")
         ws_auctions = sheet.worksheet("Auctions")
 
+        ws_listings.clear()
+        ws_listings.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days"]])
+
+        ws_auctions.clear()
+        ws_auctions.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "scheduled_closing_time", "status"]])
+
         tz_cdmx = timezone(timedelta(hours=-6))
         ahora_cdmx = datetime.now(tz_cdmx)
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
@@ -88,10 +93,11 @@ def ejecutar_freeze_diario():
         
         offset = 0
         limit = 100
-        all_listings = []
-        all_auctions = []
+        total_listings_procesados = 0
+        total_auctions_procesadas = 0
 
-        while offset < 10000:
+        # Subimos el límite seguro hasta 5,000 o más escribiendo en bloques por lotes progresivos
+        while offset < 5000:
             search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit={limit}&offset={offset}"
             response = requests.get(search_url, headers=headers)
             
@@ -103,6 +109,9 @@ def ejecutar_freeze_diario():
             
             if not items:
                 break
+
+            listings_lote = []
+            auctions_lote = []
 
             for item in items:
                 item_id = item.get("itemId", "")
@@ -123,15 +132,24 @@ def ejecutar_freeze_diario():
                         hora_cierre_formato = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
                         if fecha_cierre_cdmx_str == hoy_cdmx_str:
-                            all_auctions.append([
+                            auctions_lote.append([
                                 item_id, "PSA 10", fecha_registro_actual, title, price, 0.0, hora_cierre_formato, "Pending"
                             ])
                     except Exception:
                         pass 
                 else:
-                    all_listings.append([
+                    listings_lote.append([
                         item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1
                     ])
+
+            # Inserción progresiva por cada página para evitar acumular tiempo de espera y memoria
+            if listings_lote:
+                ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
+                total_listings_procesados += len(listings_lote)
+
+            if auctions_lote:
+                ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
+                total_auctions_procesadas += len(auctions_lote)
 
             if len(items) < limit:
                 break
@@ -139,19 +157,9 @@ def ejecutar_freeze_diario():
             offset += limit
             gc.collect()
 
-        ws_listings.clear()
-        ws_listings.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days"]])
-        if all_listings:
-            ws_listings.append_rows(all_listings, value_input_option='USER_ENTERED')
-
-        ws_auctions.clear()
-        ws_auctions.update("A1:H1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "scheduled_closing_time", "status"]])
-        if all_auctions:
-            ws_auctions.append_rows(all_auctions, value_input_option='USER_ENTERED')
-
         return jsonify({
             "status": "success",
-            "message": f"Sincronización optimizada completada. Buy It Now: {len(all_listings)}, Subastas cerrando hoy: {len(all_auctions)}"
+            "message": f"Descarga masiva completa. Buy It Now: {total_listings_procesados}, Subastas: {total_auctions_procesadas}"
         })
 
     except Exception as e:
