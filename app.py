@@ -54,7 +54,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://api.ebay.com/oauth/api_scope"
+        "scope": "https://oauth2.googleapis.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -87,24 +87,41 @@ def proceso_fondo():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # FASE 1: BARRIDA TOTAL DE BUY IT NOW POR LAS 9 CAPAS DE PRECIO (Sin límite artificial de 1000)
+        # FASE 1: BARRIDA TOTAL DE BUY IT NOW (Capas de 100 en 100)
         rangos_precios = [
-            ("0", "500.00"),
-            ("500.01", "1000.00"),
-            ("1000.01", "1500.00"),
-            ("1500.01", "2000.00"),
+            ("0", "100.00"),
+            ("100.01", "200.00"),
+            ("200.01", "300.00"),
+            ("300.01", "400.00"),
+            ("400.01", "500.00"),
+            ("500.01", "600.00"),
+            ("600.01", "700.00"),
+            ("700.01", "800.00"),
+            ("800.01", "900.00"),
+            ("900.01", "1000.00"),
+            ("1000.01", "1100.00"),
+            ("1100.01", "1200.00"),
+            ("1200.01", "1300.00"),
+            ("1300.01", "1400.00"),
+            ("1400.01", "1500.00"),
+            ("1500.01", "1600.00"),
+            ("1600.01", "1700.00"),
+            ("1700.01", "1800.00"),
+            ("1800.01", "1900.00"),
+            ("1900.01", "2000.00"),
             ("2000.01", "2500.00"),
             ("2500.01", "3000.00"),
             ("3000.01", "3500.00"),
             ("3500.01", "4000.00"),
-            ("4000.01", "99999999.00")
+            ("4000.01", "5000.00"),
+            ("5000.01", "99999999.00")
         ]
 
         for p_min, p_max in rangos_precios:
             offset = 0
             limit = 100
             
-            while offset < 2000:  # Límite técnico máximo permitido por la API de eBay por consulta
+            while offset < 2000:
                 search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
                 response = requests.get(search_url, headers=headers)
                 
@@ -134,14 +151,13 @@ def proceso_fondo():
                 if listings_lote:
                     ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
 
-                # Si trajo menos de 100 elementos, significa que llegamos al final de este rango de precios
                 if len(items) < limit:
                     break
 
                 offset += limit
                 gc.collect()
 
-        # FASE 2: BARRIDA TOTAL DE SUBASTAS QUE CIERRAN HOY EN CDMX (Paginación completa)
+        # FASE 2: BARRIDA TOTAL DE SUBASTAS QUE CIERRAN HOY EN CDMX
         offset_auc = 0
         while offset_auc < 2000:
             auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
@@ -170,7 +186,6 @@ def proceso_fondo():
                             title = item.get("title", "")
                             item_url = item.get("itemWebUrl", "")
                             
-                            # Capturamos correctamente el precio actual de puja (evitando que quede en 0)
                             price_info = item.get("price", {})
                             current_bid = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
                             
@@ -204,7 +219,7 @@ def ejecutar_freeze_diario():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Sincronización total iniciada en segundo plano con cobertura completa."
+        "message": "Sincronización total con capas de 100 en 100 iniciada en segundo plano."
     })
 
 if __name__ == "__main__":
