@@ -39,6 +39,7 @@ def conectar_sheets():
     return client.open(SPREADSHEET_NAME)
 
 def obtener_token_ebay():
+    """Autenticación con el scope general estándar de eBay."""
     client_id = os.environ.get("EBAY_CLIENT_ID")
     client_secret = os.environ.get("EBAY_CLIENT_SECRET")
 
@@ -55,7 +56,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://api.ebay.com/oauth/api_scope/buy.marketplace.insights https://api.ebay.com/oauth/api_scope"
+        "scope": "https://api.ebay.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
