@@ -55,7 +55,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://api.ebay.com/oauth/api_scope"
+        "scope": "https://oauth2.googleapis.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -100,8 +100,8 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
             if celda:
                 fila = celda.row
                 ws_auctions.update_cell(fila, 6, precio_60s)       # Columna F (final_price_60s)
-                ws_auctions.update_cell(fila, 8, bids_60s)         # Columna H (bids_60s)
-                ws_auctions.update_cell(fila, 11, "Monitoreado 60s") # Columna K (status)
+                ws_auctions.update_cell(fila, 9, bids_60s)         # Columna I (bids_60s)
+                ws_auctions.update_cell(fila, 12, "Monitoreado 60s") # Columna L (status)
 
         # 2. Esperar los 58 segundos restantes para llegar a los 2 segundos del cierre
         time.sleep(58)
@@ -127,14 +127,14 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
             if celda:
                 fila = celda.row
                 ws_auctions.update_cell(fila, 7, precio_2s)    # Columna G (final_price_2s)
-                ws_auctions.update_cell(fila, 9, bids_2s)      # Columna I (bids_2s)
-                ws_auctions.update_cell(fila, 11, "Finalizado") # Columna K (status)
+                ws_auctions.update_cell(fila, 10, bids_2s)     # Columna J (bids_2s)
+                ws_auctions.update_cell(fila, 12, "Finalizado") # Columna L (status)
                 
     except Exception as e:
         print(f"Error en temporizador para item {item_id}: {str(e)}")
 
 def barrido_listings_incremental():
-    """Escaneo incremental: Carga estricta y evita duplicados leyendo la hoja en tiempo real."""
+    """Escaneo incremental: Permite registrar la carta de nuevo si es un día diferente."""
     try:
         print("Ejecutando escaneo incremental de Buy It Now...")
         sheet = conectar_sheets()
@@ -149,13 +149,18 @@ def barrido_listings_incremental():
 
         tz_cdmx = timezone(timedelta(hours=-6))
         ahora_cdmx = datetime.now(tz_cdmx)
+        hoy_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        ids_existentes = set()
+        # Evitar duplicados solo si ya fue registrada hoy
+        claves_existentes_hoy = set()
         if len(registros) > 1:
             for fila in registros[1:]:
-                if len(fila) > 0 and fila[0]:
-                    ids_existentes.add(str(fila[0]).strip())
+                if len(fila) >= 3 and fila[0] and fila[2]:
+                    item_id = str(fila[0]).strip()
+                    fecha_fila = str(fila[2]).strip()[:10] # Extraer 'YYYY-MM-DD'
+                    if fecha_fila == hoy_str:
+                        claves_existentes_hoy.add(item_id)
 
         rangos_precios = [
             ("0", "50"), ("51", "100"), ("101", "150"), ("151", "200"),
@@ -189,14 +194,14 @@ def barrido_listings_incremental():
                     if "FIXED_PRICE" in buying_options or "BUY_IT_NOW" in buying_options:
                         item_id = str(item.get("itemId", "")).strip()
                         
-                        if item_id and item_id not in ids_existentes:
+                        if item_id and item_id not in claves_existentes_hoy:
                             title = item.get("title", "")
                             item_url = item.get("itemWebUrl", "")
                             price_info = item.get("price", {})
                             price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
                             
                             nuevos_listings.append([item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url])
-                            ids_existentes.add(item_id)
+                            claves_existentes_hoy.add(item_id)
 
                 if len(items) < limit:
                     break
@@ -214,7 +219,7 @@ def barrido_listings_incremental():
         print(f"Error en escaneo incremental: {str(e)}")
 
 def proceso_fondo():
-    """Proceso de las 12:01 AM: Volcado masivo sin duplicados y subastas con estructura de bids."""
+    """Proceso masivo de las 12:01 AM: Volcado diario con renovación de fecha y estructura de columnas correcta."""
     try:
         print("Iniciando proceso completo de las 12:01 AM...")
         sheet = conectar_sheets()
@@ -228,22 +233,25 @@ def proceso_fondo():
         ws_listings = sheet.worksheet("Listings")
         ws_auctions = sheet.worksheet("Auctions")
 
-        # Asegurar cabeceras actualizadas con las nuevas columnas de bids
+        # Configurar cabeceras exactas y ordenadas
         ws_listings.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days", "Link"]])
-        ws_auctions.update("A1:L1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "final_price_2s", "bids_60s", "bids_2s", "scheduled_closing_time", "status", "Link"]])
+        ws_auctions.update("A1:M1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "final_price_2s", "bids", "bids_60s", "bids_2s", "scheduled_closing_time", "status", "Link"]])
 
         tz_cdmx = timezone(timedelta(hours=-6))
         ahora_cdmx = datetime.now(tz_cdmx)
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Validación estricta contra duplicados en Listings
+        # Validación para Listings: Solo evita duplicar si ya se registró hoy
         registros_existentes_listings = ws_listings.get_all_values()
-        ids_vistos_matutino = set()
+        ids_vistos_hoy = set()
         if len(registros_existentes_listings) > 1:
             for fila in registros_existentes_listings[1:]:
-                if len(fila) > 0 and fila[0]:
-                    ids_vistos_matutino.add(str(fila[0]).strip())
+                if len(fila) >= 3 and fila[0] and fila[2]:
+                    item_id = str(fila[0]).strip()
+                    fecha_fila = str(fila[2]).strip()[:10]
+                    if fecha_fila == hoy_cdmx_str:
+                        ids_vistos_hoy.add(item_id)
 
         rangos_precios = [
             ("0", "50"), ("51", "100"), ("101", "150"), ("151", "200"),
@@ -276,8 +284,8 @@ def proceso_fondo():
                     buying_options = item.get("buyingOptions", [])
                     if "FIXED_PRICE" in buying_options or "BUY_IT_NOW" in buying_options:
                         item_id = str(item.get("itemId", "")).strip()
-                        if item_id and item_id not in ids_vistos_matutino:
-                            ids_vistos_matutino.add(item_id)
+                        if item_id and item_id not in ids_vistos_hoy:
+                            ids_vistos_hoy.add(item_id)
                             title = item.get("title", "")
                             item_url = item.get("itemWebUrl", "")
                             price_info = item.get("price", {})
@@ -331,10 +339,10 @@ def proceso_fondo():
                                     initial_bids = int(item.get("bidCount", 0))
                                     cierre_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-                                    # Estructura alineada a 12 columnas:
-                                    # [id, no_psa, date, title, initial_price, 60s_price, 2s_price, 60s_bids, 2s_bids, closing_time, status, link]
+                                    # Estructura estricta de 13 columnas alineadas:
+                                    # [id, no_psa, date, title, initial_price, 60s_price, 2s_price, bids_iniciales, 60s_bids, 2s_bids, cierre, status, link]
                                     auctions_lote.append([
-                                        item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, 0.0, initial_bids, 0, cierre_str, "Activa", item_url
+                                        item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, 0.0, initial_bids, 0, 0, cierre_str, "Activa", item_url
                                     ])
 
                                     hilo_monitoreo = threading.Thread(target=programar_captura_final, args=(item_id, dt_cdmx))
