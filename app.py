@@ -53,7 +53,6 @@ def obtener_token_ebay():
         "Content-Type": "application/x-www-form-urlencoded",
         "Authorization": f"Basic {encoded_credentials}"
     }
-    # Corregido con el scope exacto para la Browse API de eBay
     body = {
         "grant_type": "client_credentials",
         "scope": "https://api.ebay.com/oauth/api_scope"
@@ -66,14 +65,16 @@ def obtener_token_ebay():
         raise Exception(f"Error autenticando eBay: {response.text}")
 
 def programar_captura_final(item_id, dt_cierre_objetivo):
-    """Función que espera hasta 60 segundos antes del cierre para consultar el precio final."""
+    """Monitorea la subasta: captura precio a los 60s (Col F) y a los 2s (Col G) antes del cierre."""
     try:
         ahora = datetime.now(timezone(timedelta(hours=-6)))
-        diferencia_segundos = (dt_cierre_objetivo - ahora).total_seconds() - 60
+        
+        # 1. Esperar hasta 60 segundos antes del cierre
+        diferencia_60s = (dt_cierre_objetivo - ahora).total_seconds() - 60
+        if diferencia_60s > 0:
+            time.sleep(diferencia_60s)
 
-        if diferencia_segundos > 0:
-            time.sleep(diferencia_segundos)
-
+        # Captura de los 60 segundos
         token = obtener_token_ebay()
         headers = {
             "Authorization": f"Bearer {token}",
@@ -85,11 +86,11 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
 
         if response.status_code == 200:
             item_data = response.json()
-            precio_final = 0.0
+            precio_60s = 0.0
             if "currentBidPrice" in item_data:
-                precio_final = float(item_data["currentBidPrice"].get("value", 0))
+                precio_60s = float(item_data["currentBidPrice"].get("value", 0))
             elif "price" in item_data:
-                precio_final = float(item_data["price"].get("value", 0))
+                precio_60s = float(item_data["price"].get("value", 0))
 
             sheet = conectar_sheets()
             ws_auctions = sheet.worksheet("Auctions")
@@ -97,8 +98,33 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
 
             if celda:
                 fila = celda.row
-                ws_auctions.update_cell(fila, 6, precio_final)
-                ws_auctions.update_cell(fila, 8, "Monitoreada 60s")
+                ws_auctions.update_cell(fila, 6, precio_60s) # Columna F (60s)
+
+        # 2. Esperar los 58 segundos restantes para llegar exactamente a los 2 segundos antes del cierre
+        time.sleep(58)
+
+        # Captura de los 2 segundos finales (Sniping)
+        token = obtener_token_ebay()
+        headers["Authorization"] = f"Bearer {token}"
+        
+        response_2s = requests.get(item_url, headers=headers)
+        if response_2s.status_code == 200:
+            item_data_2s = response_2s.json()
+            precio_2s = 0.0
+            if "currentBidPrice" in item_data_2s:
+                precio_2s = float(item_data_2s["currentBidPrice"].get("value", 0))
+            elif "price" in item_data_2s:
+                precio_2s = float(item_data_2s["price"].get("value", 0))
+
+            sheet = conectar_sheets()
+            ws_auctions = sheet.worksheet("Auctions")
+            celda = ws_auctions.find(item_id)
+
+            if celda:
+                fila = celda.row
+                ws_auctions.update_cell(fila, 7, precio_2s)      # Columna G (2s)
+                ws_auctions.update_cell(fila, 9, "Monitoreada")  # Columna I (status)
+                
     except Exception as e:
         print(f"Error en temporizador para item {item_id}: {str(e)}")
 
@@ -205,7 +231,7 @@ def proceso_fondo():
             ws_listings.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days", "Link"]])
 
         if len(ws_auctions.get_all_values()) == 0:
-            ws_auctions.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "scheduled_closing_time", "status", "Link"]])
+            ws_auctions.update("A1:J1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "final_price_2s", "scheduled_closing_time", "status", "Link"]])
 
         tz_cdmx = timezone(timedelta(hours=-6))
         ahora_cdmx = datetime.now(tz_cdmx)
@@ -293,7 +319,7 @@ def proceso_fondo():
                                 cierre_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
                                 auctions_lote.append([
-                                    item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, cierre_str, "Activa", item_url
+                                    item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, 0.0, cierre_str, "Activa", item_url
                                 ])
 
                                 hilo_monitoreo = threading.Thread(target=programar_captura_final, args=(item_id, dt_cdmx))
@@ -331,7 +357,7 @@ def ejecutar_freeze_diario():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Sincronización masiva y monitoreo automático iniciados."
+        "message": "Sincronización masiva y monitoreo automático (60s y 2s) iniciados."
     })
 
 @app.route("/actualizar-listings-nuevos", methods=["GET"])
