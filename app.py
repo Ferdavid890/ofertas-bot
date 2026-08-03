@@ -101,9 +101,94 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
     except Exception as e:
         print(f"Error en temporizador para item {item_id}: {str(e)}")
 
-def proceso_fondo():
+def barrido_listings_incremental():
+    """Escaneo cada 7 mins: Solo agrega items de Buy It Now que NO se hayan registrado HOY."""
     try:
-        print("Iniciando proceso completo con capas de precios y monitoreo de 60 segundos...")
+        print("Ejecutando escaneo incremental de Buy It Now (cada 7 mins)...")
+        sheet = conectar_sheets()
+        token = obtener_token_ebay()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
+        }
+        
+        ws_listings = sheet.worksheet("Listings")
+        registros = ws_listings.get_all_values()
+
+        tz_cdmx = timezone(timedelta(hours=-6))
+        ahora_cdmx = datetime.now(tz_cdmx)
+        hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
+        fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
+
+        ids_registrados_hoy = set()
+        if len(registros) > 1:
+            for fila in registros[1:]:
+                if len(fila) >= 3:
+                    item_id_tabla = fila[0]
+                    fecha_tabla = fila[2]
+                    if fecha_tabla.startswith(hoy_cdmx_str):
+                        ids_registrados_hoy.add(item_id_tabla)
+
+        rangos_precios = [
+            ("0", "50"), ("51", "100"), ("101", "150"), ("151", "200"),
+            ("201", "250"), ("251", "300"), ("301", "350"), ("351", "400"),
+            ("401", "450"), ("451", "500"), ("501", "550"), ("551", "600"),
+            ("601", "650"), ("651", "700"), ("701", "750"), ("751", "800"),
+            ("801", "850"), ("851", "900"), ("901", "950"), ("951", "1000"),
+            ("1001", "1100"), ("1101", "1200"), ("1201", "1300"), ("1301", "1400"),
+            ("1401", "1500"), ("1501", "1600"), ("1601", "1700"), ("1701", "1800"),
+            ("1801", "1900"), ("1901", "2000"), ("2001", "2250"), ("2251", "2500"),
+            ("2501", "2750"), ("2751", "3000"), ("3001", "3500"), ("3501", "4000"),
+            ("4001", "5000"), ("5001", "999999")
+        ]
+
+        nuevos_listings = []
+        for p_min, p_max in rangos_precios:
+            offset = 0
+            limit = 100
+            while offset < 2000:
+                search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
+                response = requests.get(search_url, headers=headers)
+                if response.status_code != 200:
+                    break
+                data = response.json()
+                items = data.get("itemSummaries", [])
+                if not items:
+                    break
+
+                for item in items:
+                    buying_options = item.get("buyingOptions", [])
+                    if "FIXED_PRICE" in buying_options or "BUY_IT_NOW" in buying_options:
+                        item_id = item.get("itemId", "")
+                        
+                        if item_id and item_id not in ids_registrados_hoy:
+                            title = item.get("title", "")
+                            item_url = item.get("itemWebUrl", "")
+                            price_info = item.get("price", {})
+                            price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
+                            
+                            nuevos_listings.append([item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url])
+                            ids_registrados_hoy.add(item_id)
+
+                if len(items) < limit:
+                    break
+                offset += limit
+                time.sleep(0.3)
+                gc.collect()
+
+        if nuevos_listings:
+            ws_listings.append_rows(nuevos_listings, value_input_option='USER_ENTERED')
+            print(f"Se agregaron {len(nuevos_listings)} nuevos listings de Buy It Now (ciclo de 7 mins).")
+        else:
+            print("Sin novedades en este ciclo de 7 minutos.")
+
+    except Exception as e:
+        print(f"Error en escaneo incremental de Listings: {str(e)}")
+
+def proceso_fondo():
+    """Proceso matutino de las 6:00 AM: Volcado masivo y programación de subastas."""
+    try:
+        print("Iniciando proceso completo matutino (Listings + Subastas)...")
         sheet = conectar_sheets()
         token = obtener_token_ebay()
 
@@ -224,7 +309,7 @@ def proceso_fondo():
             time.sleep(0.3)
             gc.collect()
 
-        print("Sincronización y programación de subastas activadas correctamente.")
+        print("Sincronización matutina completa finalizada.")
 
     except Exception as e:
         print(f"Error crítico en proceso de fondo: {str(e)}")
@@ -243,7 +328,16 @@ def ejecutar_freeze_diario():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Sincronización masiva y monitoreo automático a 60s iniciados en segundo plano."
+        "message": "Sincronización masiva y monitoreo automático iniciados."
+    })
+
+@app.route("/actualizar-listings-nuevos", methods=["GET"])
+def actualizar_listings_nuevos():
+    hilo = threading.Thread(target=barrido_listings_incremental)
+    hilo.start()
+    return jsonify({
+        "status": "success",
+        "message": "Búsqueda incremental de Buy It Now (cada 7 min) iniciada."
     })
 
 if __name__ == "__main__":
