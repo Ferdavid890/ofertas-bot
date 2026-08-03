@@ -128,7 +128,7 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
         print(f"Error en temporizador para item {item_id}: {str(e)}")
 
 def barrido_listings_incremental():
-    """Escaneo incremental: Evita duplicados absolutos revisando la hoja completa."""
+    """Escaneo incremental: Carga estricta y evita duplicados leyendo la hoja en tiempo real."""
     try:
         print("Ejecutando escaneo incremental de Buy It Now...")
         sheet = conectar_sheets()
@@ -145,11 +145,12 @@ def barrido_listings_incremental():
         ahora_cdmx = datetime.now(tz_cdmx)
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
+        # Conjunto robusto con todos los IDs ya existentes en la hoja
         ids_existentes = set()
         if len(registros) > 1:
             for fila in registros[1:]:
                 if len(fila) > 0 and fila[0]:
-                    ids_existentes.add(fila[0])
+                    ids_existentes.add(str(fila[0]).strip())
 
         rangos_precios = [
             ("0", "50"), ("51", "100"), ("101", "150"), ("151", "200"),
@@ -181,7 +182,7 @@ def barrido_listings_incremental():
                 for item in items:
                     buying_options = item.get("buyingOptions", [])
                     if "FIXED_PRICE" in buying_options or "BUY_IT_NOW" in buying_options:
-                        item_id = item.get("itemId", "")
+                        item_id = str(item.get("itemId", "")).strip()
                         
                         if item_id and item_id not in ids_existentes:
                             title = item.get("title", "")
@@ -190,7 +191,7 @@ def barrido_listings_incremental():
                             price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
                             
                             nuevos_listings.append([item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url])
-                            ids_existentes.add(item_id)
+                            ids_existentes.add(item_id) # Se agrega al set local para evitar duplicados en el mismo ciclo
 
                 if len(items) < limit:
                     break
@@ -233,7 +234,13 @@ def proceso_fondo():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
+        # Validación estricta contra duplicados leyendo la hoja existente
+        registros_existentes_listings = ws_listings.get_all_values()
         ids_vistos_matutino = set()
+        if len(registros_existentes_listings) > 1:
+            for fila in registros_existentes_listings[1:]:
+                if len(fila) > 0 and fila[0]:
+                    ids_vistos_matutino.add(str(fila[0]).strip())
 
         rangos_precios = [
             ("0", "50"), ("51", "100"), ("101", "150"), ("151", "200"),
@@ -265,7 +272,7 @@ def proceso_fondo():
                 for item in items:
                     buying_options = item.get("buyingOptions", [])
                     if "FIXED_PRICE" in buying_options or "BUY_IT_NOW" in buying_options:
-                        item_id = item.get("itemId", "")
+                        item_id = str(item.get("itemId", "")).strip()
                         if item_id and item_id not in ids_vistos_matutino:
                             ids_vistos_matutino.add(item_id)
                             title = item.get("title", "")
@@ -306,7 +313,7 @@ def proceso_fondo():
                             fecha_cierre_cdmx_str = dt_cdmx.strftime("%Y-%m-%d")
 
                             if fecha_cierre_cdmx_str == hoy_cdmx_str:
-                                item_id = item.get("itemId", "")
+                                item_id = str(item.get("itemId", "")).strip()
                                 if item_id and item_id not in ids_vistos_subastas:
                                     ids_vistos_subastas.add(item_id)
                                     title = item.get("title", "")
