@@ -53,9 +53,10 @@ def obtener_token_ebay():
         "Content-Type": "application/x-www-form-urlencoded",
         "Authorization": f"Basic {encoded_credentials}"
     }
+    # Corregido con el scope exacto para la Browse API de eBay
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://oauth2.googleapis.com/oauth/api_scope"
+        "scope": "https://api.ebay.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -256,7 +257,6 @@ def proceso_fondo():
                 time.sleep(0.3)
                 gc.collect()
 
-        # Búsqueda robusta de subastas cubriendo AUCTION
         offset_auc = 0
         while offset_auc < 2000:
             auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
