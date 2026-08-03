@@ -39,6 +39,7 @@ def conectar_sheets():
     return client.open(SPREADSHEET_NAME)
 
 def obtener_token_ebay():
+    """Autenticación corregida con el scope exacto que acepta la API de eBay."""
     client_id = os.environ.get("EBAY_CLIENT_ID")
     client_secret = os.environ.get("EBAY_CLIENT_SECRET")
 
@@ -55,7 +56,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://oauth2.googleapis.com/oauth/api_scope"
+        "scope": "https://api.ebay.com/oauth/api_scope/buy.marketplace.insights https://api.ebay.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -152,13 +153,12 @@ def barrido_listings_incremental():
         hoy_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Evitar duplicados solo si ya fue registrada hoy
         claves_existentes_hoy = set()
         if len(registros) > 1:
             for fila in registros[1:]:
                 if len(fila) >= 3 and fila[0] and fila[2]:
                     item_id = str(fila[0]).strip()
-                    fecha_fila = str(fila[2]).strip()[:10] # Extraer 'YYYY-MM-DD'
+                    fecha_fila = str(fila[2]).strip()[:10]
                     if fecha_fila == hoy_str:
                         claves_existentes_hoy.add(item_id)
 
@@ -233,7 +233,6 @@ def proceso_fondo():
         ws_listings = sheet.worksheet("Listings")
         ws_auctions = sheet.worksheet("Auctions")
 
-        # Configurar cabeceras exactas y ordenadas
         ws_listings.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days", "Link"]])
         ws_auctions.update("A1:M1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "final_price_2s", "bids", "bids_60s", "bids_2s", "scheduled_closing_time", "status", "Link"]])
 
@@ -242,7 +241,6 @@ def proceso_fondo():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Validación para Listings: Solo evita duplicar si ya se registró hoy
         registros_existentes_listings = ws_listings.get_all_values()
         ids_vistos_hoy = set()
         if len(registros_existentes_listings) > 1:
@@ -339,8 +337,6 @@ def proceso_fondo():
                                     initial_bids = int(item.get("bidCount", 0))
                                     cierre_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-                                    # Estructura estricta de 13 columnas alineadas:
-                                    # [id, no_psa, date, title, initial_price, 60s_price, 2s_price, bids_iniciales, 60s_bids, 2s_bids, cierre, status, link]
                                     auctions_lote.append([
                                         item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, 0.0, initial_bids, 0, 0, cierre_str, "Activa", item_url
                                     ])
