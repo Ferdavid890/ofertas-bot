@@ -65,7 +65,7 @@ def obtener_token_ebay():
         raise Exception(f"Error autenticando eBay: {response.text}")
 
 def programar_captura_final(item_id, dt_cierre_objetivo):
-    """Monitorea la subasta: captura precio a los 60s (Col F) y a los 2s (Col G) antes del cierre."""
+    """Monitorea la subasta: captura precio y actualiza estatus a los 60s y a los 2s antes del cierre."""
     try:
         ahora = datetime.now(timezone(timedelta(hours=-6)))
         
@@ -97,7 +97,8 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
 
             if celda:
                 fila = celda.row
-                ws_auctions.update_cell(fila, 6, precio_60s) # Columna F (60s)
+                ws_auctions.update_cell(fila, 6, precio_60s)       # Columna F (60s)
+                ws_auctions.update_cell(fila, 9, "Monitoreado 60s") # Columna I (status)
 
         # 2. Esperar los 58 segundos restantes para llegar a los 2 segundos del cierre
         time.sleep(58)
@@ -120,8 +121,8 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
 
             if celda:
                 fila = celda.row
-                ws_auctions.update_cell(fila, 7, precio_2s)      # Columna G (2s)
-                ws_auctions.update_cell(fila, 9, "Monitoreada")  # Columna I (status)
+                ws_auctions.update_cell(fila, 7, precio_2s)    # Columna G (2s)
+                ws_auctions.update_cell(fila, 9, "Finalizado") # Columna I (status)
                 
     except Exception as e:
         print(f"Error en temporizador para item {item_id}: {str(e)}")
