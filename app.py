@@ -55,7 +55,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://api.ebay.com/oauth/api_scope"
+        "scope": "https://oauth2.googleapis.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -68,6 +68,8 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
     """Monitorea la subasta: captura precio a los 60s (Col F) y a los 2s (Col G) antes del cierre."""
     try:
         ahora = datetime.now(timezone(timedelta(hours=-6)))
+        
+        # 1. Esperar hasta 60 segundos antes del cierre
         diferencia_60s = (dt_cierre_objetivo - ahora).total_seconds() - 60
         if diferencia_60s > 0:
             time.sleep(diferencia_60s)
@@ -97,6 +99,7 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
                 fila = celda.row
                 ws_auctions.update_cell(fila, 6, precio_60s) # Columna F (60s)
 
+        # 2. Esperar los 58 segundos restantes para llegar a los 2 segundos del cierre
         time.sleep(58)
 
         token = obtener_token_ebay()
@@ -141,7 +144,6 @@ def barrido_listings_incremental():
         ahora_cdmx = datetime.now(tz_cdmx)
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Cargar todos los IDs existentes para evitar duplicados globales
         ids_existentes = set()
         if len(registros) > 1:
             for fila in registros[1:]:
@@ -205,7 +207,7 @@ def barrido_listings_incremental():
         print(f"Error en escaneo incremental: {str(e)}")
 
 def proceso_fondo():
-    """Proceso matutino: Volcado masivo sin duplicados y subastas alineadas."""
+    """Proceso matutino: Volcado masivo sin duplicados y subastas alineadas limpias."""
     try:
         print("Iniciando proceso completo matutino...")
         sheet = conectar_sheets()
@@ -230,7 +232,6 @@ def proceso_fondo():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Conjunto global para evitar duplicados en el volcado matutino
         ids_vistos_matutino = set()
 
         rangos_precios = [
@@ -318,8 +319,8 @@ def proceso_fondo():
                                     
                                     cierre_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-                                    # Estructura alineada de 10 columnas exactas:
-                                    # [id_item, no_psa, date, title_card, initial_price, final_price_60s, final_price_2s, scheduled_closing_time, status, Link]
+                                    # Estructura perfectamente alineada (10 columnas):
+                                    # [A:id, B:psa, C:date, D:title, E:initial_price, F:final_price_60s(0.0), G:final_price_2s(0.0), H:closing_time, I:status, J:Link]
                                     auctions_lote.append([
                                         item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, 0.0, cierre_str, "Activa", item_url
                                     ])
