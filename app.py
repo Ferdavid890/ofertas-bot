@@ -55,7 +55,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://api.ebay.com/oauth/api_scope/buy.browse"
+        "scope": "https://api.ebay.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -319,8 +319,6 @@ def proceso_fondo():
                                     
                                     cierre_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-                                    # Estructura perfectamente alineada (10 columnas):
-                                    # [A:id, B:psa, C:date, D:title, E:initial_price, F:final_price_60s(0.0), G:final_price_2s(0.0), H:closing_time, I:status, J:Link]
                                     auctions_lote.append([
                                         item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, 0.0, cierre_str, "Activa", item_url
                                     ])
