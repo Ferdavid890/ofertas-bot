@@ -55,7 +55,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://api.ebay.com/oauth/api_scope"
+        "scope": "https://oauth2.googleapis.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -102,9 +102,9 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
         print(f"Error en temporizador para item {item_id}: {str(e)}")
 
 def barrido_listings_incremental():
-    """Escaneo cada 7 mins: Solo agrega items de Buy It Now que NO se hayan registrado HOY."""
+    """Escaneo cada 10 mins: Solo agrega items de Buy It Now que NO se hayan registrado HOY."""
     try:
-        print("Ejecutando escaneo incremental de Buy It Now (cada 7 mins)...")
+        print("Ejecutando escaneo incremental de Buy It Now (cada 10 mins)...")
         sheet = conectar_sheets()
         token = obtener_token_ebay()
         headers = {
@@ -178,9 +178,9 @@ def barrido_listings_incremental():
 
         if nuevos_listings:
             ws_listings.append_rows(nuevos_listings, value_input_option='USER_ENTERED')
-            print(f"Se agregaron {len(nuevos_listings)} nuevos listings de Buy It Now (ciclo de 7 mins).")
+            print(f"Se agregaron {len(nuevos_listings)} nuevos listings de Buy It Now (ciclo de 10 mins).")
         else:
-            print("Sin novedades en este ciclo de 7 minutos.")
+            print("Sin novedades en este ciclo de 10 minutos.")
 
     except Exception as e:
         print(f"Error en escaneo incremental de Listings: {str(e)}")
@@ -256,6 +256,7 @@ def proceso_fondo():
                 time.sleep(0.3)
                 gc.collect()
 
+        # Búsqueda robusta de subastas cubriendo AUCTION
         offset_auc = 0
         while offset_auc < 2000:
             auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
@@ -269,36 +270,38 @@ def proceso_fondo():
 
             auctions_lote = []
             for item in items:
-                item_end_time = item.get("itemEndDate", "")
-                if item_end_time:
-                    try:
-                        dt_utc = datetime.fromisoformat(item_end_time.replace("Z", "+00:00"))
-                        dt_cdmx = dt_utc.astimezone(tz_cdmx)
-                        fecha_cierre_cdmx_str = dt_cdmx.strftime("%Y-%m-%d")
+                buying_options = item.get("buyingOptions", [])
+                if "AUCTION" in buying_options:
+                    item_end_time = item.get("itemEndDate", "")
+                    if item_end_time:
+                        try:
+                            dt_utc = datetime.fromisoformat(item_end_time.replace("Z", "+00:00"))
+                            dt_cdmx = dt_utc.astimezone(tz_cdmx)
+                            fecha_cierre_cdmx_str = dt_cdmx.strftime("%Y-%m-%d")
 
-                        if fecha_cierre_cdmx_str == hoy_cdmx_str:
-                            item_id = item.get("itemId", "")
-                            title = item.get("title", "")
-                            item_url = item.get("itemWebUrl", "")
-                            
-                            current_bid = 0.0
-                            if "currentBidPrice" in item:
-                                current_bid = float(item["currentBidPrice"].get("value", 0))
-                            elif "price" in item:
-                                current_bid = float(item["price"].get("value", 0))
-                            
-                            cierre_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
+                            if fecha_cierre_cdmx_str == hoy_cdmx_str:
+                                item_id = item.get("itemId", "")
+                                title = item.get("title", "")
+                                item_url = item.get("itemWebUrl", "")
+                                
+                                current_bid = 0.0
+                                if "currentBidPrice" in item:
+                                    current_bid = float(item["currentBidPrice"].get("value", 0))
+                                elif "price" in item:
+                                    current_bid = float(item["price"].get("value", 0))
+                                
+                                cierre_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-                            auctions_lote.append([
-                                item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, cierre_str, "Activa", item_url
-                            ])
+                                auctions_lote.append([
+                                    item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, cierre_str, "Activa", item_url
+                                ])
 
-                            hilo_monitoreo = threading.Thread(target=programar_captura_final, args=(item_id, dt_cdmx))
-                            hilo_monitoreo.daemon = True
-                            hilo_monitoreo.start()
+                                hilo_monitoreo = threading.Thread(target=programar_captura_final, args=(item_id, dt_cdmx))
+                                hilo_monitoreo.daemon = True
+                                hilo_monitoreo.start()
 
-                    except Exception:
-                        continue
+                        except Exception:
+                            continue
 
             if auctions_lote:
                 ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
@@ -337,7 +340,7 @@ def actualizar_listings_nuevos():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Búsqueda incremental de Buy It Now (cada 7 min) iniciada."
+        "message": "Búsqueda incremental de Buy It Now (cada 10 min) iniciada."
     })
 
 if __name__ == "__main__":
