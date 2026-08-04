@@ -55,7 +55,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://oauth/api_scope"
+        "scope": "https://api.ebay.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
