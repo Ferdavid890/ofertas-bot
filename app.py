@@ -39,7 +39,6 @@ def conectar_sheets():
     return client.open(SPREADSHEET_NAME)
 
 def obtener_token_ebay():
-    """Autenticación con el scope general estándar de eBay."""
     client_id = os.environ.get("EBAY_CLIENT_ID")
     client_secret = os.environ.get("EBAY_CLIENT_SECRET")
 
@@ -56,7 +55,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://api.ebay.com/oauth/api_scope"
+        "scope": "https://oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -67,7 +66,10 @@ def obtener_token_ebay():
 
 def programar_captura_final(item_id, dt_cierre_objetivo):
     try:
-        ahora = datetime.now(timezone(timedelta(hours=-6)))
+        tz_cdmx = timezone(timedelta(hours=-6))
+        
+        # 1. Espera para la captura de los 60 segundos antes
+        ahora = datetime.now(tz_cdmx)
         diferencia_60s = (dt_cierre_objetivo - ahora).total_seconds() - 60
         if diferencia_60s > 0:
             time.sleep(diferencia_60s)
@@ -101,7 +103,14 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
                 ws_auctions.update_cell(fila, 9, bids_60s)
                 ws_auctions.update_cell(fila, 12, "Monitoreado 60s")
 
-        time.sleep(58)
+        # 2. Espera para la captura de los 2 segundos antes
+        ahora_2 = datetime.now(tz_cdmx)
+        diferencia_2s = (dt_cierre_objetivo - ahora_2).total_seconds() - 2
+        if diferencia_2s > 0:
+            time.sleep(diferencia_2s)
+        else:
+            time.sleep(58) # Respaldo por si el bloque anterior consumió tiempo
+
         token = obtener_token_ebay()
         headers["Authorization"] = f"Bearer {token}"
         
@@ -232,7 +241,6 @@ def proceso_fondo():
         ahora_cdmx = datetime.now(tz_cdmx)
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
-        print(f"Fecha objetivo actual (CDMX): {hoy_cdmx_str}")
 
         registros_existentes_listings = ws_listings.get_all_values()
         ids_vistos_hoy = set()
@@ -257,6 +265,7 @@ def proceso_fondo():
             ("4001", "5000"), ("5001", "999999")
         ]
 
+        # 1. BARRIDO LISTINGS
         total_listings_agregados = 0
         for p_min, p_max in rangos_precios:
             offset = 0
@@ -265,7 +274,6 @@ def proceso_fondo():
                 search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
                 response = requests.get(search_url, headers=headers)
                 if response.status_code != 200:
-                    print(f"Advertencia API Listings ({p_min}-{p_max}): Status {response.status_code}")
                     break
                 data = response.json()
                 items = data.get("itemSummaries", [])
@@ -297,6 +305,7 @@ def proceso_fondo():
 
         print(f"Total de Listings agregados hoy: {total_listings_agregados}")
 
+        # 2. BARRIDO AUCTIONS (Solo las que cierran hoy)
         offset_auc = 0
         ids_vistos_subastas = set()
         total_auctions_agregadas = 0
@@ -304,7 +313,6 @@ def proceso_fondo():
             auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
             response = requests.get(auction_url, headers=headers)
             if response.status_code != 200:
-                print(f"Advertencia API Auctions: Status {response.status_code}")
                 break
             data = response.json()
             items = data.get("itemSummaries", [])
@@ -336,10 +344,10 @@ def proceso_fondo():
                                         current_bid = float(item["price"].get("value", 0))
                                     
                                     initial_bids = int(item.get("bidCount", 0))
-                                    cierre_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
+                                    cres_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
                                     auctions_lote.append([
-                                        item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, 0.0, initial_bids, 0, 0, cierre_str, "Activa", item_url
+                                        item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, 0.0, initial_bids, 0, 0, cres_str, "Activa", item_url
                                     ])
 
                                     hilo_monitoreo = threading.Thread(target=programar_captura_final, args=(item_id, dt_cdmx))
@@ -347,7 +355,6 @@ def proceso_fondo():
                                     hilo_monitoreo.start()
 
                         except Exception as ex_item:
-                            print(f"Error procesando subasta individual: {str(ex_item)}")
                             continue
 
             if auctions_lote:
@@ -361,7 +368,6 @@ def proceso_fondo():
             gc.collect()
 
         print(f"Total de Auctions agregadas hoy: {total_auctions_agregadas}")
-        print("Sincronización de las 12:01 AM completada con éxito.")
 
     except Exception as e:
         print(f"ERROR CRÍTICO en proceso de fondo: {str(e)}")
