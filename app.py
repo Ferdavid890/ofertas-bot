@@ -53,9 +53,10 @@ def obtener_token_ebay():
         "Content-Type": "application/x-www-form-urlencoded",
         "Authorization": f"Basic {encoded_credentials}"
     }
+    
+    # CORREGIDO: Se remueve el scope incorrecto para que tome el valor por defecto de la App
     body = {
-        "grant_type": "client_credentials",
-        "scope": "https://api.ebay.com/oauth/api_scope"
+        "grant_type": "client_credentials"
     }
 
     response = requests.post(url, headers=headers, data=body)
