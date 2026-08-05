@@ -6,7 +6,6 @@ from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
-import threading
 import gc
 
 app = Flask(__name__)
@@ -54,7 +53,8 @@ def obtener_token_ebay():
         "Authorization": f"Basic {encoded_credentials}"
     }
     body = {
-        "grant_type": "client_credentials"
+        "grant_type": "client_credentials",
+        "scope": "https://api.ebay.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -64,7 +64,7 @@ def obtener_token_ebay():
         raise Exception(f"Error autenticando eBay: {response.text}")
 
 def proceso_fondo():
-    print("Iniciando proceso de diagnóstico...")
+    print("Iniciando proceso completo...")
     sheet = conectar_sheets()
     token = obtener_token_ebay()
 
@@ -79,9 +79,8 @@ def proceso_fondo():
     tz_cdmx = timezone(timedelta(hours=-6))
     fecha_registro_actual = datetime.now(tz_cdmx).strftime("%Y-%m-%d %H:%M:%S")
 
-    # Probemos solo con un rango de precios amplio o una sola consulta directa sin paginación compleja para diagnosticar
-    search_url = "https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=priceCurrency:USD&limit=10"
-    print(f"Consultando URL de prueba: {search_url}")
+    search_url = "https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=priceCurrency:USD&limit=50"
+    print(f"Consultando URL: {search_url}")
     
     response = requests.get(search_url, headers=headers)
     print(f"Status Code de eBay: {response.status_code}")
@@ -89,7 +88,7 @@ def proceso_fondo():
     if response.status_code == 200:
         data = response.json()
         items = data.get("itemSummaries", [])
-        print(f"Total de items devueltos por eBay en la prueba: {len(items)}")
+        print(f"Total de items devueltos por eBay: {len(items)}")
         
         listings_lote = []
         for item in items:
@@ -99,12 +98,11 @@ def proceso_fondo():
             price_info = item.get("price", {})
             price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
             
-            print(f"Encontrado -> ID: {item_id} | Precio: {price} | Título: {title}")
             listings_lote.append([item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url])
 
         if listings_lote:
             ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
-            print(f"¡Se escribieron exitosamente {len(listings_lote)} registros de prueba en el Sheet!")
+            print(f"¡Se escribieron exitosamente {len(listings_lote)} registros en el Sheet!")
         else:
             print("La API devolvió items pero ninguno cumplió con el formato esperado.")
     else:
@@ -119,12 +117,12 @@ def home():
     return "Bot de eBay operando correctamente 🚀"
 
 @app.route("/ejecutar-freeze-diario", methods=["GET"])
-def ejecutar_freeze_diario():
+def ejecutar_freeze-diario():
     try:
         proceso_fondo()
         return jsonify({
             "status": "success",
-            "message": "Diagnóstico ejecutado correctamente. Revisa los logs de Render y tu Sheet."
+            "message": "Sincronización ejecutada correctamente. Revisa tu Sheet."
         })
     except Exception as e:
         return jsonify({
