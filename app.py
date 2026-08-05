@@ -69,7 +69,6 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
     try:
         ahora = datetime.now(timezone(timedelta(hours=-6)))
         
-        # 1. Esperar hasta 60 segundos antes del cierre
         diferencia_60s = (dt_cierre_objetivo - ahora).total_seconds() - 60
         if diferencia_60s > 0:
             time.sleep(diferencia_60s)
@@ -100,7 +99,6 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
                 ws_auctions.update_cell(fila, 6, precio_60s)       # Columna F (60s)
                 ws_auctions.update_cell(fila, 9, "Monitoreado 60s") # Columna I (status)
 
-        # 2. Esperar los 58 segundos restantes para llegar a los 2 segundos del cierre
         time.sleep(58)
 
         token = obtener_token_ebay()
@@ -128,7 +126,6 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
         print(f"Error en temporizador para item {item_id}: {str(e)}")
 
 def barrido_listings_incremental():
-    """Escaneo incremental: Carga estricta y evita duplicados leyendo la hoja en tiempo real."""
     try:
         print("Ejecutando escaneo incremental de Buy It Now...")
         sheet = conectar_sheets()
@@ -145,7 +142,6 @@ def barrido_listings_incremental():
         ahora_cdmx = datetime.now(tz_cdmx)
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Conjunto robusto con todos los IDs ya existentes en la hoja
         ids_existentes = set()
         if len(registros) > 1:
             for fila in registros[1:]:
@@ -172,8 +168,15 @@ def barrido_listings_incremental():
             while offset < 2000:
                 search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
                 response = requests.get(search_url, headers=headers)
-                if response.status_code != 200:
+                
+                # Si eBay da error 429, esperamos 3 segundos en lugar de romper de golpe
+                if response.status_code == 429:
+                    print("Límite de eBay alcanzado (429). Esperando 5s...")
+                    time.sleep(5)
+                    continue
+                elif response.status_code != 200:
                     break
+
                 data = response.json()
                 items = data.get("itemSummaries", [])
                 if not items:
@@ -183,7 +186,6 @@ def barrido_listings_incremental():
                     buying_options = item.get("buyingOptions", [])
                     if "FIXED_PRICE" in buying_options or "BUY_IT_NOW" in buying_options:
                         item_id = str(item.get("itemId", "")).strip()
-                        
                         if item_id and item_id not in ids_existentes:
                             title = item.get("title", "")
                             item_url = item.get("itemWebUrl", "")
@@ -191,12 +193,12 @@ def barrido_listings_incremental():
                             price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
                             
                             nuevos_listings.append([item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url])
-                            ids_existentes.add(item_id) # Se agrega al set local para evitar duplicados en el mismo ciclo
+                            ids_existentes.add(item_id)
 
                 if len(items) < limit:
                     break
                 offset += limit
-                time.sleep(0.3)
+                time.sleep(0.6) # Pausa ligeramente mayor para evitar baneo por saturación
                 gc.collect()
 
         if nuevos_listings:
@@ -209,7 +211,6 @@ def barrido_listings_incremental():
         print(f"Error en escaneo incremental: {str(e)}")
 
 def proceso_fondo():
-    """Proceso matutino: Volcado masivo sin duplicados y subastas alineadas limpias."""
     try:
         print("Iniciando proceso completo matutino...")
         sheet = conectar_sheets()
@@ -234,7 +235,6 @@ def proceso_fondo():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Validación estricta contra duplicados leyendo la hoja existente
         registros_existentes_listings = ws_listings.get_all_values()
         ids_vistos_matutino = set()
         if len(registros_existentes_listings) > 1:
@@ -261,8 +261,14 @@ def proceso_fondo():
             while offset < 2000:
                 search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
                 response = requests.get(search_url, headers=headers)
-                if response.status_code != 200:
+                
+                if response.status_code == 429:
+                    print("Límite de eBay alcanzado (429). Esperando 5s...")
+                    time.sleep(5)
+                    continue
+                elif response.status_code != 200:
                     break
+
                 data = response.json()
                 items = data.get("itemSummaries", [])
                 if not items:
@@ -286,7 +292,7 @@ def proceso_fondo():
                 if len(items) < limit:
                     break
                 offset += limit
-                time.sleep(0.3)
+                time.sleep(0.6)
                 gc.collect()
 
         offset_auc = 0
@@ -294,8 +300,13 @@ def proceso_fondo():
         while offset_auc < 2000:
             auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
             response = requests.get(auction_url, headers=headers)
-            if response.status_code != 200:
+            
+            if response.status_code == 429:
+                time.sleep(5)
+                continue
+            elif response.status_code != 200:
                 break
+
             data = response.json()
             items = data.get("itemSummaries", [])
             if not items:
@@ -344,7 +355,7 @@ def proceso_fondo():
             if len(items) < 100:
                 break
             offset_auc += 100
-            time.sleep(0.3)
+            time.sleep(0.6)
             gc.collect()
 
         print("Sincronización matutina completa finalizada sin duplicados.")
@@ -380,5 +391,3 @@ def actualizar_listings_nuevos():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
-
