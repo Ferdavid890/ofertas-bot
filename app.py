@@ -5,31 +5,45 @@ import requests
 from datetime import datetime, timezone, timedelta
 import threading
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 from flask import Flask, jsonify
 
 app = Flask(__name__)
 
-# Configuración de credenciales de Google Sheets (Asegúrate de tener tu archivo JSON configurado)
-def conectar_sheets():
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive.file",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    # Si usas variables de entorno o archivo local, ajusta esta parte según tu configuración actual
-    creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-    client = gspread.authorize(creds)
-    # Abre tu documento de Google Sheets (reemplaza por el nombre exacto de tu Sheet)
-    sheet = client.open("Ebay_App")
-    return sheet
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+SPREADSHEET_NAME = "Ebay_App"
 
-# Obtener Token de eBay (Ajusta con tus variables de entorno EBAY_CLIENT_ID y EBAY_CLIENT_SECRET)
+def conectar_sheets():
+    client_email = os.environ.get("GOOGLE_CLIENT_EMAIL")
+    private_key = os.environ.get("GOOGLE_PRIVATE_KEY")
+    project_id = os.environ.get("GOOGLE_PROJECT_ID")
+
+    if not client_email or not private_key or not project_id:
+        raise Exception("Faltan variables de entorno de Google Sheets.")
+
+    private_key = private_key.replace("\\n", "\n")
+    creds_info = {
+        "type": "service_account",
+        "project_id": project_id,
+        "private_key": private_key,
+        "client_email": client_email,
+        "token_uri": "https://oauth2.googleapis.com/token"
+    }
+
+    creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+    client = gspread.authorize(creds)
+    return client.open(SPREADSHEET_NAME)
+
 def obtener_token_ebay():
     client_id = os.environ.get("EBAY_CLIENT_ID")
     client_secret = os.environ.get("EBAY_CLIENT_SECRET")
     
+    if not client_id or not client_secret:
+        raise Exception("Faltan las credenciales de eBay.")
+
     auth_url = "https://api.ebay.com/identity/v1/oauth2/token"
     headers = {
         "Content-Type": "application/x-www-form-urlencoded"
@@ -46,7 +60,6 @@ def obtener_token_ebay():
         raise Exception(f"No se pudo obtener el token de eBay: {response.text}")
 
 def programar_captura_final(item_id, dt_cierre_cdmx):
-    # Lógica para monitorear el cierre de subastas si ya la usas en tu app
     pass
 
 def proceso_fondo():
@@ -81,7 +94,6 @@ def proceso_fondo():
                     if fecha_fila == hoy_cdmx_str:
                         ids_vistos_hoy.add(item_id)
 
-        # Tus rangos de precios originales y detallados
         rangos_precios = [
             ("0", "50"), ("51", "100"), ("101", "150"), ("151", "200"),
             ("201", "250"), ("251", "300"), ("301", "350"), ("351", "400"),
@@ -95,7 +107,6 @@ def proceso_fondo():
             ("4001", "5000"), ("5001", "999999")
         ]
 
-        # 1. BARRIDO LISTINGS POR CAPAS
         total_listings_agregados = 0
         for p_min, p_max in rangos_precios:
             offset = 0
@@ -135,7 +146,6 @@ def proceso_fondo():
 
         print(f"Total de Listings agregados hoy: {total_listings_agregados}")
 
-        # 2. BARRIDO AUCTIONS POR CAPAS
         ids_vistos_subastas = set()
         total_auctions_agregadas = 0
         
