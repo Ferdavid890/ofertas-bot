@@ -365,6 +365,7 @@ def proceso_fondo():
 
     except Exception as e:
         print(f"ERROR CRÍTICO en proceso de fondo: {str(e)}")
+        raise e  # Lanzamos el error para que la ruta de prueba lo capture en pantalla
 
 @app.route("/ping")
 def ping():
@@ -373,6 +374,15 @@ def ping():
 @app.route("/")
 def home():
     return "Bot de eBay para Lorcana PSA 10 operando correctamente 🚀"
+
+@app.route("/probar-directo", methods=["GET"])
+def probar_directo():
+    try:
+        # Ejecuta de forma síncrona para que veas el error exacto en la pantalla o consola
+        proceso_fondo()
+        return "Proceso directo terminado con éxito. Revisa tu Google Sheet."
+    except Exception as e:
+        return f"Error crítico atrapado: {str(e)}", 500
 
 @app.route("/ejecutar-freeze-diario", methods=["GET"])
 def ejecutar_freeze_diario():
