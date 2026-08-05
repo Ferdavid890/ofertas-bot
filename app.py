@@ -157,16 +157,8 @@ def barrido_listings_incremental():
                         claves_existentes_hoy.add(item_id)
 
         rangos_precios = [
-            ("0", "50"), ("51", "100"), ("101", "150"), ("151", "200"),
-            ("201", "250"), ("251", "300"), ("301", "350"), ("351", "400"),
-            ("401", "450"), ("451", "500"), ("501", "550"), ("551", "600"),
-            ("601", "650"), ("651", "700"), ("701", "750"), ("751", "800"),
-            ("801", "850"), ("851", "900"), ("901", "950"), ("951", "1000"),
-            ("1001", "1100"), ("1101", "1200"), ("1201", "1300"), ("1301", "1400"),
-            ("1401", "1500"), ("1501", "1600"), ("1601", "1700"), ("1701", "1800"),
-            ("1801", "1900"), ("1901", "2000"), ("2001", "2250"), ("2251", "2500"),
-            ("2501", "2750"), ("2751", "3000"), ("3001", "3500"), ("3501", "4000"),
-            ("4001", "5000"), ("5001", "999999")
+            ("0", "100"), ("101", "300"), ("301", "600"), ("601", "1000"),
+            ("1001", "2000"), ("2001", "5000"), ("5001", "999999")
         ]
 
         nuevos_listings = []
@@ -176,8 +168,15 @@ def barrido_listings_incremental():
             while offset < 2000:
                 search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
                 response = requests.get(search_url, headers=headers)
+                
+                if response.status_code == 429:
+                    print(f"Límite alcanzado (429) en incremental. Esperando 5 segundos...")
+                    time.sleep(5.0)
+                    continue
+
                 if response.status_code != 200:
                     break
+                
                 data = response.json()
                 items = data.get("itemSummaries", [])
                 if not items:
@@ -199,7 +198,7 @@ def barrido_listings_incremental():
                 if len(items) < limit:
                     break
                 offset += limit
-                time.sleep(0.3)
+                time.sleep(1.2)
                 gc.collect()
 
         if nuevos_listings:
@@ -232,7 +231,6 @@ def proceso_fondo():
         ahora_cdmx = datetime.now(tz_cdmx)
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
-        print(f"Fecha objetivo actual (CDMX): {hoy_cdmx_str}")
 
         registros_existentes_listings = ws_listings.get_all_values()
         ids_vistos_hoy = set()
@@ -245,16 +243,8 @@ def proceso_fondo():
                         ids_vistos_hoy.add(item_id)
 
         rangos_precios = [
-            ("0", "50"), ("51", "100"), ("101", "150"), ("151", "200"),
-            ("201", "250"), ("251", "300"), ("301", "350"), ("351", "400"),
-            ("401", "450"), ("451", "500"), ("501", "550"), ("551", "600"),
-            ("601", "650"), ("651", "700"), ("701", "750"), ("751", "800"),
-            ("801", "850"), ("851", "900"), ("901", "950"), ("951", "1000"),
-            ("1001", "1100"), ("1101", "1200"), ("1201", "1300"), ("1301", "1400"),
-            ("1401", "1500"), ("1501", "1600"), ("1601", "1700"), ("1701", "1800"),
-            ("1801", "1900"), ("1901", "2000"), ("2001", "2250"), ("2251", "2500"),
-            ("2501", "2750"), ("2751", "3000"), ("3001", "3500"), ("3501", "4000"),
-            ("4001", "5000"), ("5001", "999999")
+            ("0", "100"), ("101", "300"), ("301", "600"), ("601", "1000"),
+            ("1001", "2000"), ("2001", "5000"), ("5001", "999999")
         ]
 
         total_listings_agregados = 0
@@ -264,9 +254,16 @@ def proceso_fondo():
             while offset < 2000:
                 search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
                 response = requests.get(search_url, headers=headers)
+                
+                if response.status_code == 429:
+                    print(f"Límite alcanzado (429) en rango {p_min}-{p_max}. Esperando 5 segundos...")
+                    time.sleep(5.0)
+                    continue
+
                 if response.status_code != 200:
                     print(f"Advertencia API Listings ({p_min}-{p_max}): Status {response.status_code}")
                     break
+                
                 data = response.json()
                 items = data.get("itemSummaries", [])
                 if not items:
@@ -292,7 +289,7 @@ def proceso_fondo():
                 if len(items) < limit:
                     break
                 offset += limit
-                time.sleep(0.3)
+                time.sleep(1.2)
                 gc.collect()
 
         print(f"Total de Listings agregados hoy: {total_listings_agregados}")
@@ -303,9 +300,16 @@ def proceso_fondo():
         while offset_auc < 2000:
             auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
             response = requests.get(auction_url, headers=headers)
+            
+            if response.status_code == 429:
+                print("Límite alcanzado (429) en Subastas. Esperando 5 segundos...")
+                time.sleep(5.0)
+                continue
+
             if response.status_code != 200:
                 print(f"Advertencia API Auctions: Status {response.status_code}")
                 break
+
             data = response.json()
             items = data.get("itemSummaries", [])
             if not items:
@@ -347,7 +351,6 @@ def proceso_fondo():
                                     hilo_monitoreo.start()
 
                         except Exception as ex_item:
-                            print(f"Error procesando subasta individual: {str(ex_item)}")
                             continue
 
             if auctions_lote:
@@ -357,7 +360,7 @@ def proceso_fondo():
             if len(items) < 100:
                 break
             offset_auc += 100
-            time.sleep(0.3)
+            time.sleep(1.2)
             gc.collect()
 
         print(f"Total de Auctions agregadas hoy: {total_auctions_agregadas}")
@@ -365,7 +368,7 @@ def proceso_fondo():
 
     except Exception as e:
         print(f"ERROR CRÍTICO en proceso de fondo: {str(e)}")
-        raise e  # Lanzamos el error para que la ruta de prueba lo capture en pantalla
+        raise e
 
 @app.route("/ping")
 def ping():
@@ -378,7 +381,6 @@ def home():
 @app.route("/probar-directo", methods=["GET"])
 def probar_directo():
     try:
-        # Ejecuta de forma síncrona para que veas el error exacto en la pantalla o consola
         proceso_fondo()
         return "Proceso directo terminado con éxito. Revisa tu Google Sheet."
     except Exception as e:
