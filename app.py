@@ -65,6 +65,9 @@ def obtener_token_ebay():
         raise Exception(f"Error autenticando eBay: {response.text}")
 
 def programar_captura_final(item_id, dt_cierre_objetivo):
+    """
+    Hilo optimizado y seguro para capturar precios a los 60s y 2s antes del cierre de la subasta.
+    """
     try:
         tz_cdmx = timezone(timedelta(hours=-6))
         
@@ -140,7 +143,7 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
 
 def barrido_listings_incremental():
     try:
-        print("Ejecutando escaneo incremental de Buy It Now...")
+        print("Ejecutando escaneo incremental de Buy It Now por capas...")
         sheet = conectar_sheets()
         token = obtener_token_ebay()
         headers = {
@@ -208,7 +211,7 @@ def barrido_listings_incremental():
                 if len(items) < limit:
                     break
                 offset += limit
-                time.sleep(0.3)
+                time.sleep(0.2)
                 gc.collect()
 
         if nuevos_listings:
@@ -222,7 +225,7 @@ def barrido_listings_incremental():
 
 def proceso_fondo():
     try:
-        print("Iniciando proceso completo de las 12:01 AM...")
+        print("Iniciando proceso completo y masivo por capas...")
         sheet = conectar_sheets()
         token = obtener_token_ebay()
 
@@ -265,7 +268,7 @@ def proceso_fondo():
             ("4001", "5000"), ("5001", "999999")
         ]
 
-        # 1. BARRIDO LISTINGS
+        # 1. BARRIDO LISTINGS POR CAPAS
         total_listings_agregados = 0
         for p_min, p_max in rangos_precios:
             offset = 0
@@ -300,72 +303,76 @@ def proceso_fondo():
                 if len(items) < limit:
                     break
                 offset += limit
-                time.sleep(0.3)
+                time.sleep(0.2)
                 gc.collect()
 
         print(f"Total de Listings agregados hoy: {total_listings_agregados}")
 
-        # 2. BARRIDO AUCTIONS (Solo las que cierran hoy)
-        offset_auc = 0
+        # 2. BARRIDO AUCTIONS POR CAPAS (Asegurando capturar las que cierran hoy)
         ids_vistos_subastas = set()
         total_auctions_agregadas = 0
-        while offset_auc < 2000:
-            auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
-            response = requests.get(auction_url, headers=headers)
-            if response.status_code != 200:
-                break
-            data = response.json()
-            items = data.get("itemSummaries", [])
-            if not items:
-                break
+        
+        for p_min, p_max in rangos_precios:
+            offset_auc = 0
+            while offset_auc < 2000:
+                auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},price:[{p_min}..{p_max}],priceCurrency:USD&limit=100&offset={offset_auc}"
+                response = requests.get(auction_url, headers=headers)
+                if response.status_code != 200:
+                    break
+                data = response.json()
+                items = data.get("itemSummaries", [])
+                if not items:
+                    break
 
-            auctions_lote = []
-            for item in items:
-                buying_options = item.get("buyingOptions", [])
-                if "AUCTION" in buying_options:
-                    item_end_time = item.get("itemEndDate", "")
-                    if item_end_time:
-                        try:
-                            dt_utc = datetime.fromisoformat(item_end_time.replace("Z", "+00:00"))
-                            dt_cdmx = dt_utc.astimezone(tz_cdmx)
-                            fecha_cierre_cdmx_str = dt_cdmx.strftime("%Y-%m-%d")
+                auctions_lote = []
+                for item in items:
+                    buying_options = item.get("buyingOptions", [])
+                    if "AUCTION" in buying_options:
+                        item_end_time = item.get("itemEndDate", "")
+                        if item_end_time:
+                            try:
+                                dt_utc = datetime.fromisoformat(item_end_time.replace("Z", "+00:00"))
+                                dt_cdmx = dt_utc.astimezone(tz_cdmx)
+                                fecha_cierre_cdmx_str = dt_cdmx.strftime("%Y-%m-%d")
 
-                            if fecha_cierre_cdmx_str == hoy_cdmx_str:
-                                item_id = str(item.get("itemId", "")).strip()
-                                if item_id and item_id not in ids_vistos_subastas:
-                                    ids_vistos_subastas.add(item_id)
-                                    title = item.get("title", "")
-                                    item_url = item.get("itemWebUrl", "")
-                                    
-                                    current_bid = 0.0
-                                    if "currentBidPrice" in item:
-                                        current_bid = float(item["currentBidPrice"].get("value", 0))
-                                    elif "price" in item:
-                                        current_bid = float(item["price"].get("value", 0))
-                                    
-                                    initial_bids = int(item.get("bidCount", 0))
-                                    cres_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
+                                # Validamos de forma estricta que cierre hoy en CDMX
+                                if fecha_cierre_cdmx_str == hoy_cdmx_str:
+                                    item_id = str(item.get("itemId", "")).strip()
+                                    if item_id and item_id not in ids_vistos_subastas:
+                                        ids_vistos_subastas.add(item_id)
+                                        title = item.get("title", "")
+                                        item_url = item.get("itemWebUrl", "")
+                                        
+                                        current_bid = 0.0
+                                        if "currentBidPrice" in item:
+                                            current_bid = float(item["currentBidPrice"].get("value", 0))
+                                        elif "price" in item:
+                                            current_bid = float(item["price"].get("value", 0))
+                                        
+                                        initial_bids = int(item.get("bidCount", 0))
+                                        cres_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-                                    auctions_lote.append([
-                                        item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, 0.0, initial_bids, 0, 0, cres_str, "Activa", item_url
-                                    ])
+                                        auctions_lote.append([
+                                            item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, 0.0, initial_bids, 0, 0, cres_str, "Activa", item_url
+                                        ])
 
-                                    hilo_monitoreo = threading.Thread(target=programar_captura_final, args=(item_id, dt_cdmx))
-                                    hilo_monitoreo.daemon = True
-                                    hilo_monitoreo.start()
+                                        # Lanzar hilo de monitoreo de subasta de forma segura
+                                        hilo_monitoreo = threading.Thread(target=programar_captura_final, args=(item_id, dt_cdmx))
+                                        hilo_monitoreo.daemon = True
+                                        hilo_monitoreo.start()
 
-                        except Exception as ex_item:
-                            continue
+                            except Exception as ex_item:
+                                continue
 
-            if auctions_lote:
-                ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
-                total_auctions_agregadas += len(auctions_lote)
+                if auctions_lote:
+                    ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
+                    total_auctions_agregadas += len(auctions_lote)
 
-            if len(items) < 100:
-                break
-            offset_auc += 100
-            time.sleep(0.3)
-            gc.collect()
+                if len(items) < 100:
+                    break
+                offset_auc += 100
+                time.sleep(0.2)
+                gc.collect()
 
         print(f"Total de Auctions agregadas hoy: {total_auctions_agregadas}")
 
@@ -386,7 +393,7 @@ def ejecutar_freeze_diario():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Sincronización masiva de las 12:01 AM iniciada."
+        "message": "Sincronización masiva de las 12:01 AM iniciada por capas."
     })
 
 @app.route("/actualizar-listings-nuevos", methods=["GET"])
@@ -395,10 +402,8 @@ def actualizar_listings_nuevos():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Búsqueda incremental limpia iniciada."
+        "message": "Búsqueda incremental por capas iniciada."
     })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
-
