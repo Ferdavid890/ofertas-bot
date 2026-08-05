@@ -3,7 +3,6 @@ import time
 import gc
 import requests
 from datetime import datetime, timezone, timedelta
-import threading
 import gspread
 from google.oauth2.service_account import Credentials
 from flask import Flask, jsonify
@@ -62,9 +61,10 @@ def obtener_token_ebay():
 def programar_captura_final(item_id, dt_cierre_cdmx):
     pass
 
-def proceso_fondo():
+@app.route('/ejecutar-freeze-diario', methods=['GET'])
+def disparar_proceso():
     try:
-        print("Iniciando proceso completo y masivo por capas...")
+        print("Iniciando proceso completo y masivo por capas (Modo Síncrono)...")
         sheet = conectar_sheets()
         token = obtener_token_ebay()
 
@@ -115,6 +115,7 @@ def proceso_fondo():
                 search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
                 response = requests.get(search_url, headers=headers)
                 if response.status_code != 200:
+                    print(f"Error en API eBay ({response.status_code}): {response.text}")
                     break
                 data = response.json()
                 items = data.get("itemSummaries", [])
@@ -142,84 +143,13 @@ def proceso_fondo():
                     break
                 offset += limit
                 time.sleep(0.1)
-                gc.collect()
 
         print(f"Total de Listings agregados hoy: {total_listings_agregados}")
-
-        ids_vistos_subastas = set()
-        total_auctions_agregadas = 0
-        
-        for p_min, p_max in rangos_precios:
-            offset_auc = 0
-            while offset_auc < 1000:
-                auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},price:[{p_min}..{p_max}],priceCurrency:USD&limit=100&offset={offset_auc}"
-                response = requests.get(auction_url, headers=headers)
-                if response.status_code != 200:
-                    break
-                data = response.json()
-                items = data.get("itemSummaries", [])
-                if not items:
-                    break
-
-                auctions_lote = []
-                for item in items:
-                    buying_options = item.get("buyingOptions", [])
-                    if "AUCTION" in buying_options:
-                        item_end_time = item.get("itemEndDate", "")
-                        if item_end_time:
-                            try:
-                                dt_utc = datetime.fromisoformat(item_end_time.replace("Z", "+00:00"))
-                                dt_cdmx = dt_utc.astimezone(tz_cdmx)
-                                fecha_cierre_cdmx_str = dt_cdmx.strftime("%Y-%m-%d")
-
-                                if fecha_cierre_cdmx_str == hoy_cdmx_str:
-                                    item_id = str(item.get("itemId", "")).strip()
-                                    if item_id and item_id not in ids_vistos_subastas:
-                                        ids_vistos_subastas.add(item_id)
-                                        title = item.get("title", "")
-                                        item_url = item.get("itemWebUrl", "")
-                                        
-                                        current_bid = 0.0
-                                        if "currentBidPrice" in item:
-                                            current_bid = float(item["currentBidPrice"].get("value", 0))
-                                        elif "price" in item:
-                                            current_bid = float(item["price"].get("value", 0))
-                                        
-                                        initial_bids = int(item.get("bidCount", 0))
-                                        cres_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
-
-                                        auctions_lote.append([
-                                            item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, 0.0, initial_bids, 0, 0, cres_str, "Activa", item_url
-                                        ])
-
-                                        hilo_monitoreo = threading.Thread(target=programar_captura_final, args=(item_id, dt_cdmx))
-                                        hilo_monitoreo.daemon = True
-                                        hilo_monitoreo.start()
-
-                            except Exception as ex_item:
-                                continue
-
-                if auctions_lote:
-                    ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
-                    total_auctions_agregadas += len(auctions_lote)
-
-                if len(items) < 100:
-                    break
-                offset_auc += 100
-                time.sleep(0.1)
-                gc.collect()
-
-        print(f"Total de Auctions agregadas hoy: {total_auctions_agregadas}")
+        return jsonify({"message": f"Proceso finalizado. Listings agregados: {total_listings_agregados}", "status": "success"})
 
     except Exception as e:
-        print(f"ERROR CRÍTICO en proceso de fondo: {str(e)}")
-
-@app.route('/ejecutar-freeze-diario', methods=['GET'])
-def disparar_proceso():
-    hilo = threading.Thread(target=proceso_fondo)
-    hilo.daemon = True
-    hilo.start()
-    return jsonify({"message": "Sincronización masiva de las 12:01 AM iniciada por capas.", "status": "success"})
+        print(f"ERROR CRÍTICO: {str(e)}")
+        return jsonify({"error": str(e)}, 500)
 
 @app.route('/ping', methods=['GET'])
 def ping():
