@@ -55,7 +55,6 @@ def obtener_token_ebay():
         "Authorization": f"Basic {encoded_credentials}"
     }
     
-    # Intentamos primero con el scope específico de la API Buy
     body = {
         "grant_type": "client_credentials",
         "scope": "https://api.ebay.com/oauth/api_scope/buy.item.bulk"
@@ -63,7 +62,6 @@ def obtener_token_ebay():
 
     response = requests.post(url, headers=headers, data=body)
     
-    # Si falla, probamos con el scope global estándar
     if response.status_code != 200:
         body["scope"] = "https://api.ebay.com/oauth/api_scope"
         response = requests.post(url, headers=headers, data=body)
@@ -91,12 +89,7 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
 
         if response.status_code == 200:
             item_data = response.json()
-            precio_60s = 0.0
-            if "currentBidPrice" in item_data:
-                precio_60s = float(item_data["currentBidPrice"].get("value", 0))
-            elif "price" in item_data:
-                precio_60s = float(item_data["price"].get("value", 0))
-            
+            precio_60s = float(item_data.get("currentBidPrice", item_data.get("price", {})).get("value", 0))
             bids_60s = int(item_data.get("bidCount", 0))
 
             sheet = conectar_sheets()
@@ -116,12 +109,7 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
         response_2s = requests.get(item_url, headers=headers)
         if response_2s.status_code == 200:
             item_data_2s = response_2s.json()
-            precio_2s = 0.0
-            if "currentBidPrice" in item_data_2s:
-                precio_2s = float(item_data_2s["currentBidPrice"].get("value", 0))
-            elif "price" in item_data_2s:
-                precio_2s = float(item_data_2s["price"].get("value", 0))
-            
+            precio_2s = float(item_data_2s.get("currentBidPrice", item_data_2s.get("price", {})).get("value", 0))
             bids_2s = int(item_data_2s.get("bidCount", 0))
 
             sheet = conectar_sheets()
@@ -164,62 +152,44 @@ def barrido_listings_incremental():
                     if fecha_fila == hoy_str:
                         claves_existentes_hoy.add(item_id)
 
-        rangos_precios = [
-            ("0", "50"), ("51", "100"), ("101", "150"), ("151", "200"),
-            ("201", "250"), ("251", "300"), ("301", "350"), ("351", "400"),
-            ("401", "450"), ("451", "500"), ("501", "550"), ("551", "600"),
-            ("601", "650"), ("651", "700"), ("701", "750"), ("751", "800"),
-            ("801", "850"), ("851", "900"), ("901", "950"), ("951", "1000"),
-            ("1001", "1100"), ("1101", "1200"), ("1201", "1300"), ("1301", "1400"),
-            ("1401", "1500"), ("1501", "1600"), ("1601", "1700"), ("1701", "1800"),
-            ("1801", "1900"), ("1901", "2000"), ("2001", "2250"), ("2251", "2500"),
-            ("2501", "2750"), ("2751", "3000"), ("3001", "3500"), ("3501", "4000"),
-            ("4001", "5000"), ("5001", "999999")
-        ]
-
         nuevos_listings = []
-        for p_min, p_max in rangos_precios:
-            offset = 0
-            limit = 100
-            while offset < 2000:
-                search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
-                
-                intentos = 0
-                response = None
-                while intentos < 5:
-                    response = requests.get(search_url, headers=headers)
-                    if response.status_code == 429:
-                        intentos += 1
-                        time.sleep(5 * intentos)
-                    else:
-                        break
-
-                if response.status_code != 200:
-                    break
-                
-                data = response.json()
-                items = data.get("itemSummaries", [])
-                if not items:
+        offset = 0
+        limit = 100
+        while offset < 1000:
+            search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{FIXED_PRICE}},priceCurrency:USD&limit={limit}&offset={offset}"
+            
+            intentos = 0
+            response = None
+            while intentos < 5:
+                response = requests.get(search_url, headers=headers)
+                if response.status_code == 429:
+                    intentos += 1
+                    time.sleep(5 * intentos)
+                else:
                     break
 
-                for item in items:
-                    buying_options = item.get("buyingOptions", [])
-                    if "FIXED_PRICE" in buying_options or "BUY_IT_NOW" in buying_options:
-                        item_id = str(item.get("itemId", "")).strip()
-                        if item_id and item_id not in claves_existentes_hoy:
-                            title = item.get("title", "")
-                            item_url = item.get("itemWebUrl", "")
-                            price_info = item.get("price", {})
-                            price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
-                            
-                            nuevos_listings.append([item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url])
-                            claves_existentes_hoy.add(item_id)
+            if response.status_code != 200:
+                break
+            
+            data = response.json()
+            items = data.get("itemSummaries", [])
+            if not items:
+                break
 
-                if len(items) < limit:
-                    break
-                offset += limit
-                time.sleep(1.5)
-                gc.collect()
+            for item in items:
+                item_id = str(item.get("itemId", "")).strip()
+                if item_id and item_id not in claves_existentes_hoy:
+                    title = item.get("title", "")
+                    item_url = item.get("itemWebUrl", "")
+                    price_info = item.get("price", {})
+                    price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
+                    
+                    nuevos_listings.append([item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url])
+                    claves_existentes_hoy.add(item_id)
+
+            if len(items) < limit:
+                break
+            offset += limit
             time.sleep(2.0)
 
         if nuevos_listings:
@@ -233,7 +203,7 @@ def barrido_listings_incremental():
 
 def proceso_fondo():
     try:
-        print("Iniciando proceso completo de las 12:01 AM...")
+        print("Iniciando proceso completo...")
         sheet = conectar_sheets()
         token = obtener_token_ebay()
 
@@ -253,83 +223,54 @@ def proceso_fondo():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        registros_existentes_listings = ws_listings.get_all_values()
+        # Escaneo de Listings (Buy It Now) de forma directa y limpia
+        offset = 0
+        limit = 100
         ids_vistos_hoy = set()
-        if len(registros_existentes_listings) > 1:
-            for fila in registros_existentes_listings[1:]:
-                if len(fila) >= 3 and fila[0] and fila[2]:
-                    item_id = str(fila[0]).strip()
-                    fecha_fila = str(fila[2]).strip()[:10]
-                    if fecha_fila == hoy_cdmx_str:
-                        ids_vistos_hoy.add(item_id)
-
-        rangos_precios = [
-            ("0", "50"), ("51", "100"), ("101", "150"), ("151", "200"),
-            ("201", "250"), ("251", "300"), ("301", "350"), ("351", "400"),
-            ("401", "450"), ("451", "500"), ("501", "550"), ("551", "600"),
-            ("601", "650"), ("651", "700"), ("701", "750"), ("751", "800"),
-            ("801", "850"), ("851", "900"), ("901", "950"), ("951", "1000"),
-            ("1001", "1100"), ("1101", "1200"), ("1201", "1300"), ("1301", "1400"),
-            ("1401", "1500"), ("1501", "1600"), ("1601", "1700"), ("1701", "1800"),
-            ("1801", "1900"), ("1901", "2000"), ("2001", "2250"), ("2251", "2500"),
-            ("2501", "2750"), ("2751", "3000"), ("3001", "3500"), ("3501", "4000"),
-            ("4001", "5000"), ("5001", "999999")
-        ]
-
         total_listings_agregados = 0
-        for p_min, p_max in rangos_precios:
-            offset = 0
-            limit = 100
-            print(f"Scrapeando rango de precios: ${p_min} - ${p_max}")
-            while offset < 2000:
-                try:
-                    search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
-                    
-                    intentos = 0
-                    response = None
-                    while intentos < 5:
-                        response = requests.get(search_url, headers=headers)
-                        if response.status_code == 429:
-                            intentos += 1
-                            tiempo_espera = 5 * intentos
-                            print(f"Límite 429 alcanzado en rango ${p_min}-${p_max}. Esperando {tiempo_espera}s (Reintento {intentos}/5)...")
-                            time.sleep(tiempo_espera)
-                        else:
-                            break
 
-                    if response.status_code != 200:
-                        print(f"Aviso: Rango ${p_min}-${p_max} omitido por límite de eBay (HTTP {response.status_code})")
-                        break
-                    
-                    data = response.json()
-                    items = data.get("itemSummaries", [])
-                    if not items:
-                        break
-
-                    listings_lote = []
-                    for item in items:
-                        buying_options = item.get("buyingOptions", [])
-                        if "FIXED_PRICE" in buying_options or "BUY_IT_NOW" in buying_options:
-                            item_id = str(item.get("itemId", "")).strip()
-                            if item_id and item_id not in ids_vistos_hoy:
-                                ids_vistos_hoy.add(item_id)
-                                title = item.get("title", "")
-                                item_url = item.get("itemWebUrl", "")
-                                price_info = item.get("price", {})
-                                price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
-                                listings_lote.append([item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url])
-
-                    if listings_lote:
-                        ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
-                        total_listings_agregados += len(listings_lote)
-
-                    if len(items) < limit:
-                        break
-                    offset += limit
-                    time.sleep(1.5)
-                except Exception as ex:
-                    print(f"Excepción en sub-bucle de rango ${p_min}-${p_max}: {str(ex)}")
+        while offset < 1000:
+            search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{FIXED_PRICE}},priceCurrency:USD&limit={limit}&offset={offset}"
+            
+            intentos = 0
+            response = None
+            while intentos < 5:
+                response = requests.get(search_url, headers=headers)
+                if response.status_code == 429:
+                    intentos += 1
+                    tiempo_espera = 5 * intentos
+                    print(f"Límite 429 alcanzado en Listings. Esperando {tiempo_espera}s...")
+                    time.sleep(tiempo_espera)
+                else:
                     break
+
+            if response.status_code != 200:
+                print(f"Error HTTP {response.status_code} en listings")
+                break
+            
+            data = response.json()
+            items = data.get("itemSummaries", [])
+            if not items:
+                break
+
+            listings_lote = []
+            for item in items:
+                item_id = str(item.get("itemId", "")).strip()
+                if item_id and item_id not in ids_vistos_hoy:
+                    ids_vistos_hoy.add(item_id)
+                    title = item.get("title", "")
+                    item_url = item.get("itemWebUrl", "")
+                    price_info = item.get("price", {})
+                    price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
+                    listings_lote.append([item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url])
+
+            if listings_lote:
+                ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
+                total_listings_agregados += len(listings_lote)
+
+            if len(items) < limit:
+                break
+            offset += limit
             time.sleep(2.0)
             gc.collect()
 
@@ -339,7 +280,7 @@ def proceso_fondo():
         offset_auc = 0
         ids_vistos_subastas = set()
         total_auctions_agregadas = 0
-        while offset_auc < 2000:
+        while offset_auc < 1000:
             auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
             
             intentos = 0
@@ -362,41 +303,33 @@ def proceso_fondo():
 
             auctions_lote = []
             for item in items:
-                buying_options = item.get("buyingOptions", [])
-                if "AUCTION" in buying_options:
-                    item_end_time = item.get("itemEndDate", "")
-                    if item_end_time:
-                        try:
-                            dt_utc = datetime.fromisoformat(item_end_time.replace("Z", "+00:00"))
-                            dt_cdmx = dt_utc.astimezone(tz_cdmx)
-                            fecha_cierre_cdmx_str = dt_cdmx.strftime("%Y-%m-%d")
+                item_end_time = item.get("itemEndDate", "")
+                if item_end_time:
+                    try:
+                        dt_utc = datetime.fromisoformat(item_end_time.replace("Z", "+00:00"))
+                        dt_cdmx = dt_utc.astimezone(tz_cdmx)
+                        fecha_cierre_cdmx_str = dt_cdmx.strftime("%Y-%m-%d")
 
-                            if fecha_cierre_cdmx_str == hoy_cdmx_str:
-                                item_id = str(item.get("itemId", "")).strip()
-                                if item_id and item_id not in ids_vistos_subastas:
-                                    ids_vistos_subastas.add(item_id)
-                                    title = item.get("title", "")
-                                    item_url = item.get("itemWebUrl", "")
-                                    
-                                    current_bid = 0.0
-                                    if "currentBidPrice" in item:
-                                        current_bid = float(item["currentBidPrice"].get("value", 0))
-                                    elif "price" in item:
-                                        current_bid = float(item["price"].get("value", 0))
-                                    
-                                    initial_bids = int(item.get("bidCount", 0))
-                                    cierre_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
+                        if fecha_cierre_cdmx_str == hoy_cdmx_str:
+                            item_id = str(item.get("itemId", "")).strip()
+                            if item_id and item_id not in ids_vistos_subastas:
+                                ids_vistos_subastas.add(item_id)
+                                title = item.get("title", "")
+                                item_url = item.get("itemWebUrl", "")
+                                current_bid = float(item.get("currentBidPrice", item.get("price", {})).get("value", 0))
+                                initial_bids = int(item.get("bidCount", 0))
+                                cierre_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-                                    auctions_lote.append([
-                                        item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, 0.0, initial_bids, 0, 0, cierre_str, "Activa", item_url
-                                    ])
+                                auctions_lote.append([
+                                    item_id, "PSA 10", fecha_registro_actual, title, current_bid, 0.0, 0.0, initial_bids, 0, 0, cierre_str, "Activa", item_url
+                                ])
 
-                                    hilo_monitoreo = threading.Thread(target=programar_captura_final, args=(item_id, dt_cdmx))
-                                    hilo_monitoreo.daemon = True
-                                    hilo_monitoreo.start()
+                                hilo_monitoreo = threading.Thread(target=programar_captura_final, args=(item_id, dt_cdmx))
+                                hilo_monitoreo.daemon = True
+                                hilo_monitoreo.start()
 
-                        except Exception:
-                            continue
+                    except Exception:
+                        continue
 
             if auctions_lote:
                 ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
@@ -405,7 +338,7 @@ def proceso_fondo():
             if len(items) < 100:
                 break
             offset_auc += 100
-            time.sleep(1.5)
+            time.sleep(2.0)
             gc.collect()
 
         print(f"Total de Auctions agregadas hoy: {total_auctions_agregadas}")
@@ -413,7 +346,6 @@ def proceso_fondo():
 
     except Exception as e:
         print(f"ERROR CRÍTICO en proceso de fondo: {str(e)}")
-        raise e
 
 @app.route("/ping")
 def ping():
@@ -425,17 +357,13 @@ def home():
 
 @app.route("/probar-directo", methods=["GET"])
 def probar_directo():
-    try:
-        proceso_fondo()
-        return jsonify({
-            "status": "success",
-            "message": "¡Proceso ejecutado y finalizado correctamente! Revisa tu Google Sheets."
-        })
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
+    hilo = threading.Thread(target=proceso_fondo)
+    hilo.daemon = True
+    hilo.start()
+    return jsonify({
+        "status": "success",
+        "message": "¡Proceso iniciado en segundo plano! Revisa tus logs en unos momentos y tu Google Sheets."
+    })
 
 @app.route("/ejecutar-freeze-diario", methods=["GET"])
 def ejecutar_freeze_diario():
@@ -444,12 +372,13 @@ def ejecutar_freeze_diario():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Sincronización masiva de las 12:01 AM iniciada."
+        "message": "Sincronización masiva iniciada."
     })
 
 @app.route("/actualizar-listings-nuevos", methods=["GET"])
 def actualizar_listings_nuevos():
     hilo = threading.Thread(target=barrido_listings_incremental)
+    hilo.daemon = True
     hilo.start()
     return jsonify({
         "status": "success",
