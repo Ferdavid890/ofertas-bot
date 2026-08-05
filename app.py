@@ -56,7 +56,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://api.ebay.com/oauth/api_scope"
+        "scope": "https://oauth.ebay.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -403,6 +403,7 @@ def proceso_fondo():
 
     except Exception as e:
         print(f"ERROR CRÍTICO en proceso de fondo: {str(e)}")
+        raise e
 
 @app.route("/ping")
 def ping():
@@ -414,13 +415,18 @@ def home():
 
 @app.route("/probar-directo", methods=["GET"])
 def probar_directo():
-    hilo = threading.Thread(target=proceso_fondo)
-    hilo.daemon = True
-    hilo.start()
-    return jsonify({
-        "status": "success",
-        "message": "Proceso directo iniciado en segundo plano. Revisa los logs de Render para ver la descarga en tiempo real."
-    })
+    try:
+        # Ejecución directa y sincrónica para evitar que Render mate el proceso
+        proceso_fondo()
+        return jsonify({
+            "status": "success",
+            "message": "¡Proceso ejecutado y finalizado correctamente! Revisa tu Google Sheets."
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 @app.route("/ejecutar-freeze-diario", methods=["GET"])
 def ejecutar_freeze_diario():
