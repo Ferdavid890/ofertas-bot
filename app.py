@@ -58,13 +58,10 @@ def obtener_token_ebay():
     else:
         raise Exception(f"No se pudo obtener el token de eBay: {response.text}")
 
-def programar_captura_final(item_id, dt_cierre_cdmx):
-    pass
-
 @app.route('/ejecutar-freeze-diario', methods=['GET'])
 def disparar_proceso():
     try:
-        print("Iniciando proceso completo y masivo por capas (Modo Síncrono)...")
+        print("Iniciando proceso masivo controlado por capas...")
         sheet = conectar_sheets()
         token = obtener_token_ebay()
 
@@ -94,6 +91,7 @@ def disparar_proceso():
                     if fecha_fila == hoy_cdmx_str:
                         ids_vistos_hoy.add(item_id)
 
+        # Tus rangos de precios originales y detallados
         rangos_precios = [
             ("0", "50"), ("51", "100"), ("101", "150"), ("151", "200"),
             ("201", "250"), ("251", "300"), ("301", "350"), ("351", "400"),
@@ -113,10 +111,17 @@ def disparar_proceso():
             limit = 100
             while offset < 1000:
                 search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
+                
                 response = requests.get(search_url, headers=headers)
+                
+                # Si eBay nos da error de límite (429), esperamos 2 segundos y reintentamos una vez
+                if response.status_code == 429:
+                    time.sleep(2.0)
+                    response = requests.get(search_url, headers=headers)
+
                 if response.status_code != 200:
-                    print(f"Error en API eBay ({response.status_code}): {response.text}")
                     break
+
                 data = response.json()
                 items = data.get("itemSummaries", [])
                 if not items:
@@ -142,10 +147,12 @@ def disparar_proceso():
                 if len(items) < limit:
                     break
                 offset += limit
-                time.sleep(0.1)
+                
+                # Pausa de seguridad obligatoria para no saturar a eBay (Rate Limit)
+                time.sleep(0.5)
 
         print(f"Total de Listings agregados hoy: {total_listings_agregados}")
-        return jsonify({"message": f"Proceso finalizado. Listings agregados: {total_listings_agregados}", "status": "success"})
+        return jsonify({"message": f"Proceso finalizado con éxito. Listings agregados: {total_listings_agregados}", "status": "success"})
 
     except Exception as e:
         print(f"ERROR CRÍTICO: {str(e)}")
