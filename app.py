@@ -55,7 +55,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://api.ebay.com/oauth/api_scope"
+        "scope": "https://oauth.ebay.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -109,7 +109,7 @@ def programar_captura_final(item_id, dt_cierre_objetivo):
         if diferencia_2s > 0:
             time.sleep(diferencia_2s)
         else:
-            time.sleep(58) # Respaldo por si el bloque anterior consumió tiempo
+            time.sleep(58)
 
         token = obtener_token_ebay()
         headers["Authorization"] = f"Bearer {token}"
@@ -185,6 +185,9 @@ def barrido_listings_incremental():
             while offset < 2000:
                 search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
                 response = requests.get(search_url, headers=headers)
+                if response.status_code == 429:
+                    time.sleep(2.0)
+                    response = requests.get(search_url, headers=headers)
                 if response.status_code != 200:
                     break
                 data = response.json()
@@ -208,7 +211,7 @@ def barrido_listings_incremental():
                 if len(items) < limit:
                     break
                 offset += limit
-                time.sleep(0.3)
+                time.sleep(0.5)
                 gc.collect()
 
         if nuevos_listings:
@@ -273,6 +276,9 @@ def proceso_fondo():
             while offset < 2000:
                 search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
                 response = requests.get(search_url, headers=headers)
+                if response.status_code == 429:
+                    time.sleep(2.0)
+                    response = requests.get(search_url, headers=headers)
                 if response.status_code != 200:
                     break
                 data = response.json()
@@ -300,7 +306,7 @@ def proceso_fondo():
                 if len(items) < limit:
                     break
                 offset += limit
-                time.sleep(0.3)
+                time.sleep(0.5)
                 gc.collect()
 
         print(f"Total de Listings agregados hoy: {total_listings_agregados}")
@@ -312,6 +318,9 @@ def proceso_fondo():
         while offset_auc < 2000:
             auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
             response = requests.get(auction_url, headers=headers)
+            if response.status_code == 429:
+                time.sleep(2.0)
+                response = requests.get(auction_url, headers=headers)
             if response.status_code != 200:
                 break
             data = response.json()
@@ -364,7 +373,7 @@ def proceso_fondo():
             if len(items) < 100:
                 break
             offset_auc += 100
-            time.sleep(0.3)
+            time.sleep(0.5)
             gc.collect()
 
         print(f"Total de Auctions agregadas hoy: {total_auctions_agregadas}")
@@ -386,7 +395,7 @@ def ejecutar_freeze_diario():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Sincronización masiva de las 12:01 AM iniciada."
+        "message": "Sincronización masiva de las 12:01 AM iniciada en segundo plano."
     })
 
 @app.route("/actualizar-listings-nuevos", methods=["GET"])
@@ -395,9 +404,9 @@ def actualizar_listings_nuevos():
     hilo.start()
     return jsonify({
         "status": "success",
-        "message": "Búsqueda incremental limpia iniciada."
+        "message": "Búsqueda incremental limpia iniciada en segundo plano."
     })
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
-
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
