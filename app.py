@@ -50,9 +50,10 @@ def obtener_token_ebay():
         "Content-Type": "application/x-www-form-urlencoded",
         "Authorization": f"Basic {encoded_credentials}"
     }
-    # Se remueve el campo 'scope' ya que Browse API usa los permisos nativos de la App Keys
+    # Scope requerido por la API de eBay para autorizar las consultas de Buy Browse
     body = {
-        "grant_type": "client_credentials"
+        "grant_type": "client_credentials",
+        "scope": "https://api.ebay.com/oauth/api_scope"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -80,7 +81,6 @@ def proceso_prueba_5_registros():
     ahora_cdmx = datetime.now(tz_cdmx)
     fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-    # Búsqueda general directa sin gastar rangos masivos
     search_url = "https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit=5"
     response = requests.get(search_url, headers=headers)
     
