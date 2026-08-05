@@ -186,11 +186,11 @@ def barrido_listings_incremental():
                 
                 intentos = 0
                 response = None
-                while intentos < 3:
+                while intentos < 5:
                     response = requests.get(search_url, headers=headers)
                     if response.status_code == 429:
                         intentos += 1
-                        time.sleep(3 * intentos)
+                        time.sleep(5 * intentos)
                     else:
                         break
 
@@ -218,8 +218,9 @@ def barrido_listings_incremental():
                 if len(items) < limit:
                     break
                 offset += limit
-                time.sleep(0.6)
+                time.sleep(1.5)
                 gc.collect()
+            time.sleep(2.0)
 
         if nuevos_listings:
             ws_listings.append_rows(nuevos_listings, value_input_option='USER_ENTERED')
@@ -286,17 +287,18 @@ def proceso_fondo():
                     
                     intentos = 0
                     response = None
-                    while intentos < 3:
+                    while intentos < 5:
                         response = requests.get(search_url, headers=headers)
                         if response.status_code == 429:
                             intentos += 1
-                            print(f"Límite 429 alcanzado en rango ${p_min}-${p_max}. Reintento {intentos}...")
-                            time.sleep(3 * intentos)
+                            tiempo_espera = 5 * intentos
+                            print(f"Límite 429 alcanzado en rango ${p_min}-${p_max}. Esperando {tiempo_espera}s (Reintento {intentos}/5)...")
+                            time.sleep(tiempo_espera)
                         else:
                             break
 
                     if response.status_code != 200:
-                        print(f"Error HTTP {response.status_code} en rango ${p_min}-${p_max}")
+                        print(f"Aviso: Rango ${p_min}-${p_max} omitido por límite de eBay (HTTP {response.status_code})")
                         break
                     
                     data = response.json()
@@ -320,15 +322,15 @@ def proceso_fondo():
                     if listings_lote:
                         ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
                         total_listings_agregados += len(listings_lote)
-                        time.sleep(1)
 
                     if len(items) < limit:
                         break
                     offset += limit
-                    time.sleep(0.5)
+                    time.sleep(1.5)
                 except Exception as ex:
                     print(f"Excepción en sub-bucle de rango ${p_min}-${p_max}: {str(ex)}")
                     break
+            time.sleep(2.0)
             gc.collect()
 
         print(f"Total de Listings agregados hoy: {total_listings_agregados}")
@@ -342,11 +344,11 @@ def proceso_fondo():
             
             intentos = 0
             response = None
-            while intentos < 3:
+            while intentos < 5:
                 response = requests.get(auction_url, headers=headers)
                 if response.status_code == 429:
                     intentos += 1
-                    time.sleep(3 * intentos)
+                    time.sleep(5 * intentos)
                 else:
                     break
 
@@ -403,7 +405,7 @@ def proceso_fondo():
             if len(items) < 100:
                 break
             offset_auc += 100
-            time.sleep(0.6)
+            time.sleep(1.5)
             gc.collect()
 
         print(f"Total de Auctions agregadas hoy: {total_auctions_agregadas}")
