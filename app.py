@@ -117,7 +117,7 @@ def home():
     return "Bot de eBay operando correctamente 🚀"
 
 @app.route("/ejecutar-freeze-diario", methods=["GET"])
-def ejecutar_freeze-diario():
+def ejecutar_freeze_diario():
     try:
         proceso_fondo()
         return jsonify({
