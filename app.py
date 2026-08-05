@@ -271,52 +271,61 @@ def proceso_fondo():
         for p_min, p_max in rangos_precios:
             offset = 0
             limit = 100
+            print(f"Scrapeando rango de precios: ${p_min} - ${p_max}")
             while offset < 2000:
-                search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
-                
-                intentos = 0
-                response = None
-                while intentos < 3:
-                    response = requests.get(search_url, headers=headers)
-                    if response.status_code == 429:
-                        intentos += 1
-                        time.sleep(3 * intentos)
-                    else:
+                try:
+                    search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
+                    
+                    intentos = 0
+                    response = None
+                    while intentos < 3:
+                        response = requests.get(search_url, headers=headers)
+                        if response.status_code == 429:
+                            intentos += 1
+                            print(f"Límite 429 alcanzado en rango ${p_min}-${p_max}. Reintento {intentos}...")
+                            time.sleep(3 * intentos)
+                        else:
+                            break
+
+                    if response.status_code != 200:
+                        print(f"Error HTTP {response.status_code} en rango ${p_min}-${p_max}")
+                        break
+                    
+                    data = response.json()
+                    items = data.get("itemSummaries", [])
+                    if not items:
                         break
 
-                if response.status_code != 200:
-                    break
-                
-                data = response.json()
-                items = data.get("itemSummaries", [])
-                if not items:
-                    break
+                    listings_lote = []
+                    for item in items:
+                        buying_options = item.get("buyingOptions", [])
+                        if "FIXED_PRICE" in buying_options or "BUY_IT_NOW" in buying_options:
+                            item_id = str(item.get("itemId", "")).strip()
+                            if item_id and item_id not in ids_vistos_hoy:
+                                ids_vistos_hoy.add(item_id)
+                                title = item.get("title", "")
+                                item_url = item.get("itemWebUrl", "")
+                                price_info = item.get("price", {})
+                                price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
+                                listings_lote.append([item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url])
 
-                listings_lote = []
-                for item in items:
-                    buying_options = item.get("buyingOptions", [])
-                    if "FIXED_PRICE" in buying_options or "BUY_IT_NOW" in buying_options:
-                        item_id = str(item.get("itemId", "")).strip()
-                        if item_id and item_id not in ids_vistos_hoy:
-                            ids_vistos_hoy.add(item_id)
-                            title = item.get("title", "")
-                            item_url = item.get("itemWebUrl", "")
-                            price_info = item.get("price", {})
-                            price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
-                            listings_lote.append([item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url])
+                    if listings_lote:
+                        ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
+                        total_listings_agregados += len(listings_lote)
+                        time.sleep(1)
 
-                if listings_lote:
-                    ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
-                    total_listings_agregados += len(listings_lote)
-
-                if len(items) < limit:
+                    if len(items) < limit:
+                        break
+                    offset += limit
+                    time.sleep(0.5)
+                except Exception as ex:
+                    print(f"Excepción en sub-bucle de rango ${p_min}-${p_max}: {str(ex)}")
                     break
-                offset += limit
-                time.sleep(0.6)
-                gc.collect()
+            gc.collect()
 
         print(f"Total de Listings agregados hoy: {total_listings_agregados}")
 
+        # Sección de Subastas (Auctions)
         offset_auc = 0
         ids_vistos_subastas = set()
         total_auctions_agregadas = 0
@@ -394,7 +403,6 @@ def proceso_fondo():
 
     except Exception as e:
         print(f"ERROR CRÍTICO en proceso de fondo: {str(e)}")
-        raise e
 
 @app.route("/ping")
 def ping():
