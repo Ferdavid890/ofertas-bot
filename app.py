@@ -1,12 +1,10 @@
 import os
 import base64
 import requests
-import time
 from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify
 import gspread
 from google.oauth2.service_account import Credentials
-import gc
 
 app = Flask(__name__)
 
@@ -52,9 +50,9 @@ def obtener_token_ebay():
         "Content-Type": "application/x-www-form-urlencoded",
         "Authorization": f"Basic {encoded_credentials}"
     }
+    # Se remueve el campo 'scope' ya que Browse API usa los permisos nativos de la App Keys
     body = {
-        "grant_type": "client_credentials",
-        "scope": "https://oauth.ebay.com/api_scope"
+        "grant_type": "client_credentials"
     }
 
     response = requests.post(url, headers=headers, data=body)
@@ -63,8 +61,8 @@ def obtener_token_ebay():
     else:
         raise Exception(f"Error autenticando eBay: {response.text}")
 
-def proceso_fondo():
-    print("Iniciando proceso completo de descarga...")
+def proceso_prueba_5_registros():
+    print("Iniciando prueba de descarga de 5 registros...")
     sheet = conectar_sheets()
     token = obtener_token_ebay()
 
@@ -74,96 +72,52 @@ def proceso_fondo():
     }
     
     ws_listings = sheet.worksheet("Listings")
-    ws_auctions = sheet.worksheet("Auctions")
 
     if len(ws_listings.get_all_values()) == 0:
         ws_listings.update("A1:I1", [["id_item", "no_psa", "date", "title_card", "price", "listing_type", "fmv", "volume_7days", "Link"]])
 
-    if len(ws_auctions.get_all_values()) == 0:
-        ws_auctions.update("A1:J1", [["id_item", "no_psa", "date", "title_card", "initial_price", "final_price_60s", "final_price_2s", "scheduled_closing_time", "status", "Link"]])
-
     tz_cdmx = timezone(timedelta(hours=-6))
     ahora_cdmx = datetime.now(tz_cdmx)
-    hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
     fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-    registros_existentes_listings = ws_listings.get_all_values()
-    ids_vistos_matutino = set()
-    if len(registros_existentes_listings) > 1:
-        for fila in registros_existentes_listings[1:]:
-            if len(fila) > 0 and fila[0]:
-                ids_vistos_matutino.add(str(fila[0]).strip())
+    # Búsqueda general directa sin gastar rangos masivos
+    search_url = "https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&limit=5"
+    response = requests.get(search_url, headers=headers)
+    
+    if response.status_code != 200:
+        raise Exception(f"Error en la API de eBay: {response.text}")
 
-    rangos_precios = [
-        ("0", "50"), ("51", "100"), ("101", "150"), ("151", "200"),
-        ("201", "250"), ("251", "300"), ("301", "350"), ("351", "400"),
-        ("401", "450"), ("451", "500"), ("501", "550"), ("551", "600"),
-        ("601", "650"), ("651", "700"), ("701", "750"), ("751", "800"),
-        ("801", "850"), ("851", "900"), ("901", "950"), ("951", "1000"),
-        ("1001", "1100"), ("1101", "1200"), ("1201", "1300"), ("1301", "1400"),
-        ("1401", "1500"), ("1501", "1600"), ("1601", "1700"), ("1701", "1800"),
-        ("1801", "1900"), ("1901", "2000"), ("2001", "2250"), ("2251", "2500"),
-        ("2501", "2750"), ("2751", "3000"), ("3001", "3500"), ("3501", "4000"),
-        ("4001", "5000"), ("5001", "999999")
-    ]
+    data = response.json()
+    items = data.get("itemSummaries", [])
+    
+    if not items:
+        raise Exception("La API respondió correctamente pero no devolvió ningún artículo para 'Lorcana PSA 10'.")
 
-    for p_min, p_max in rangos_precios:
-        offset = 0
-        limit = 100
-        while offset < 2000:
-            search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD&limit={limit}&offset={offset}"
-            response = requests.get(search_url, headers=headers)
-            
-            if response.status_code == 429:
-                print("Límite de eBay alcanzado (429). Esperando 5s...")
-                time.sleep(5)
-                continue
-            elif response.status_code != 200:
-                break
+    listings_lote = []
+    for item in items:
+        item_id = str(item.get("itemId", "")).strip()
+        title = item.get("title", "")
+        item_url = item.get("itemWebUrl", "")
+        price_info = item.get("price", {})
+        price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
+        
+        listings_lote.append([item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url])
 
-            data = response.json()
-            items = data.get("itemSummaries", [])
-            if not items:
-                break
-
-            listings_lote = []
-            for item in items:
-                buying_options = item.get("buyingOptions", [])
-                if "FIXED_PRICE" in buying_options or "BUY_IT_NOW" in buying_options:
-                    item_id = str(item.get("itemId", "")).strip()
-                    if item_id and item_id not in ids_vistos_matutino:
-                        ids_vistos_matutino.add(item_id)
-                        title = item.get("title", "")
-                        item_url = item.get("itemWebUrl", "")
-                        price_info = item.get("price", {})
-                        price = float(price_info.get("value", 0)) if price_info.get("value") else 0.0
-                        listings_lote.append([item_id, "PSA 10", fecha_registro_actual, title, price, "Buy It Now", price, 1, item_url])
-
-            if listings_lote:
-                ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
-            if len(items) < limit:
-                break
-            offset += limit
-            time.sleep(0.6)
-            gc.collect()
-
-    print("Descarga de Listings finalizada con éxito.")
-
-@app.route("/ping")
-def ping():
-    return "Pong! Servidor activo.", 200
+    if listings_lote:
+        ws_listings.append_rows(listings_lote, value_input_option='USER_ENTERED')
+        print(f"Se agregaron {len(listings_lote)} registros exitosamente.")
 
 @app.route("/")
 def home():
-    return "Bot de eBay para Lorcana PSA 10 operando correctamente 🚀"
+    return "Bot de eBay operando correctamente 🚀"
 
 @app.route("/ejecutar-freeze-diario", methods=["GET"])
 def ejecutar_freeze_diario():
     try:
-        proceso_fondo()
+        proceso_prueba_5_registros()
         return jsonify({
             "status": "success",
-            "message": "Sincronización masiva ejecutada correctamente en Google Sheets."
+            "message": "¡Prueba de 5 registros insertada con éxito en Google Sheets!"
         })
     except Exception as e:
         return jsonify({
