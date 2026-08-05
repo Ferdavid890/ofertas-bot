@@ -406,15 +406,18 @@ def home():
 
 @app.route("/probar-directo", methods=["GET"])
 def probar_directo():
-    try:
-        proceso_fondo()
-        return "Proceso directo terminado con éxito. Revisa tu Google Sheet."
-    except Exception as e:
-        return f"Error crítico atrapado: {str(e)}", 500
+    hilo = threading.Thread(target=proceso_fondo)
+    hilo.daemon = True
+    hilo.start()
+    return jsonify({
+        "status": "success",
+        "message": "Proceso directo iniciado en segundo plano. Revisa los logs de Render para ver la descarga en tiempo real."
+    })
 
 @app.route("/ejecutar-freeze-diario", methods=["GET"])
 def ejecutar_freeze_diario():
     hilo = threading.Thread(target=proceso_fondo)
+    hilo.daemon = True
     hilo.start()
     return jsonify({
         "status": "success",
