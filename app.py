@@ -39,7 +39,7 @@ def conectar_sheets():
     return client.open(SPREADSHEET_NAME)
 
 def obtener_token_ebay():
-    """Autenticación con el scope general estándar de eBay."""
+    """Autenticación para la API Browse de eBay."""
     client_id = os.environ.get("EBAY_CLIENT_ID")
     client_secret = os.environ.get("EBAY_CLIENT_SECRET")
 
@@ -54,12 +54,20 @@ def obtener_token_ebay():
         "Content-Type": "application/x-www-form-urlencoded",
         "Authorization": f"Basic {encoded_credentials}"
     }
+    
+    # Intentamos primero con el scope específico de la API Buy
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://oauth.ebay.com/oauth/api_scope"
+        "scope": "https://api.ebay.com/oauth/api_scope/buy.item.bulk"
     }
 
     response = requests.post(url, headers=headers, data=body)
+    
+    # Si falla, probamos con el scope global estándar
+    if response.status_code != 200:
+        body["scope"] = "https://api.ebay.com/oauth/api_scope"
+        response = requests.post(url, headers=headers, data=body)
+
     if response.status_code == 200:
         return response.json().get("access_token")
     else:
@@ -416,7 +424,6 @@ def home():
 @app.route("/probar-directo", methods=["GET"])
 def probar_directo():
     try:
-        # Ejecución directa y sincrónica para evitar que Render mate el proceso
         proceso_fondo()
         return jsonify({
             "status": "success",
