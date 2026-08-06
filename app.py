@@ -33,8 +33,7 @@ EXECUTION_LOCK = threading.Lock()
 SHEET_CLIENT = None
 SPREADSHEET_OBJ = None
 
-# Caché en memoria para evitar consultas masivas constantes a Sheets
-# Estructura: { item_id: { "row_index": int, "first_seen": str, "no_apariciones": int } }
+# Caché en memoria para metadatos de Listings y Subastas
 CACHE_LISTINGS_METADATA = {}
 IDS_EXISTENTES_SUBASTAS = set()
 
@@ -78,7 +77,7 @@ def inicializar_cache_memoria():
     try:
         sheet = obtener_cliente_sheets()
         
-        # Listings: Mapeo de ID -> { row_index, first_seen, no_apariciones }
+        # Listings
         try:
             ws_listings = sheet.worksheet("Listings")
             filas_l = ws_listings.get_all_values()
@@ -161,7 +160,6 @@ def peticion_ebay_con_retry(url, headers):
     for intento in range(intentos):
         try:
             response = http_session.get(url, headers=headers, timeout=(5, 15))
-            
             if response.status_code == 200:
                 time.sleep(random.uniform(0.3, 0.7))
                 return response
@@ -174,6 +172,7 @@ def peticion_ebay_con_retry(url, headers):
                 logging.warning(f"[Error Servidor eBay {response.status_code}]. Reintentando en {tiempo_espera}s...")
                 time.sleep(tiempo_espera)
             else:
+                logging.warning(f"[eBay API Error] Código {response.status_code} para URL: {url} | Respuesta: {response.text}")
                 break
         except requests.exceptions.RequestException as e:
             logging.error(f"[Excepción HTTP] {str(e)}. Reintentando...")
@@ -197,7 +196,8 @@ def buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats):
     items_acumulados = []
     limit = 100
     
-    search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD,buyingOptions:{{FIXED_PRICE}}&limit={limit}&offset=0"
+    # Filtro corregido y compatible con la API de eBay Browse
+    search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD,buyingOptions:FIXED_PRICE&limit={limit}&offset=0"
     stats["consultas_ebay"] += 1
     resp = peticion_ebay_con_retry(search_url, headers)
     
@@ -215,7 +215,6 @@ def buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats):
         items_acumulados.extend(buscar_ebay_recursivo_adaptativo(str(punto_medio + 0.01), p_max, headers, stats))
         return items_acumulados
 
-    # Calcular páginas exactas necesarias usando el total
     items_acumulados.extend(data.get("itemSummaries", []))
     paginas_totales = ceil(total_resultados / limit) if total_resultados > 0 else 1
     
@@ -223,7 +222,7 @@ def buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats):
         offset = page * limit
         if offset >= 2000:
             break
-        paged_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD,buyingOptions:{{FIXED_PRICE}}&limit={limit}&offset={offset}"
+        paged_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD,buyingOptions:FIXED_PRICE&limit={limit}&offset={offset}"
         stats["consultas_ebay"] += 1
         resp = peticion_ebay_con_retry(paged_url, headers)
         if not resp or resp.status_code != 200:
@@ -256,6 +255,14 @@ def barrido_listings_incremental_worker():
         tz_cdmx = timezone(timedelta(hours=-6))
         ahora_str = datetime.now(tz_cdmx).strftime("%Y-%m-%d %H:%M:%S")
 
+        # Asegurar cabeceras si la hoja estuviera vacía
+        if len(ws_listings.get_all_values()) == 0:
+            ws_listings.update("A1:O1", [[
+                "id_item", "first_seen", "last_seen", "No_Apariciones", "Vendedor", 
+                "Location", "no_psa", "date", "title_card", "price", "Status", 
+                "listing_type", "fmv", "volume_7days", "Link"
+            ]])
+
         rangos_base = [
             ("0", "150"), ("151", "400"), ("401", "800"), 
             ("801", "1500"), ("1501", "3000"), ("3001", "999999")
@@ -285,17 +292,14 @@ def barrido_listings_incremental_worker():
                     meta = CACHE_LISTINGS_METADATA.get(item_id)
 
                 if meta:
-                    # El ítem ya existe: actualizamos last_seen, incrementamos apariciones y mantenemos activo
                     row_idx = meta["row_index"]
                     nuevo_apariciones = meta["no_apariciones"] + 1
                     meta["no_apariciones"] = nuevo_apariciones
 
-                    # Actualización en bloque para Google Sheets (Columnas C: last_seen, D: no_apariciones, E: Vendedor, F: Location, K: Status)
                     actualizaciones_batch.append({'range': f'C{row_idx}:F{row_idx}', 'values': [[ahora_str, nuevo_apariciones, vendedor, location]]})
                     actualizaciones_batch.append({'range': f'K{row_idx}', 'values': [["Activo"]]})
                     stats["actualizados"] += 1
                 else:
-                    # Ítem nuevo absoluto
                     first_seen = ahora_str
                     last_seen = ahora_str
                     no_apariciones = 1
@@ -313,10 +317,8 @@ def barrido_listings_incremental_worker():
 
             gc.collect()
 
-        # Agregar nuevos al final de la hoja
         if nuevos_listings:
             ws_listings.append_rows(nuevos_listings, value_input_option='USER_ENTERED')
-            # Registrar en memoria los nuevos añadidos
             filas_actuales = len(ws_listings.get_all_values())
             inicio_nuevos = filas_actuales - len(nuevos_listings) + 1
             with CACHE_LOCK:
@@ -329,14 +331,12 @@ def barrido_listings_incremental_worker():
                     }
             stats["nuevos_agregados"] = len(nuevos_listings)
 
-        # Marcar como "Vendido" aquellos que ya no aparecieron en el escaneo
         with CACHE_LOCK:
             for item_id, meta in CACHE_LISTINGS_METADATA.items():
                 if item_id not in items_encontrados_hoy:
                     row_idx = meta["row_index"]
                     actualizaciones_batch.append({'range': f'K{row_idx}', 'values': [["Vendido"]]})
 
-        # Ejecutar batch updates masivos hacia Google Sheets
         if actualizaciones_batch:
             ws_listings.batch_update(actualizaciones_batch)
 
@@ -344,7 +344,7 @@ def barrido_listings_incremental_worker():
         logging.info(f"--- [FIN] Barrido completado en {tiempo_total:.2f}s --- | Métricas: {stats}")
 
     except Exception as e:
-        logging.error(f"[Error Crítico en Barrido] {str(e)}")
+        logging.error(f"[Error Crítico en Barrido Listings] {str(e)}")
     finally:
         EXECUTION_LOCK.release()
 
@@ -373,8 +373,8 @@ def revisar_y_actualizar_subastas_worker():
                 continue
                 
             item_id = fila[0]
-            cierre_str = fila[12] # scheduled_closing_time en Columna M
-            status = fila[13] # status en Columna N
+            cierre_str = fila[12]
+            status = fila[13]
 
             if status == "Finalizado":
                 continue
@@ -384,7 +384,6 @@ def revisar_y_actualizar_subastas_worker():
                 segundos_restantes = (dt_cierre - ahora_cdmx).total_seconds()
                 fila_excel = idx + 2
 
-                # Ventana de 60 segundos
                 if status == "Activa" and -10 <= segundos_restantes <= 75:
                     item_url = f"https://api.ebay.com/buy/browse/v1/item/{item_id}"
                     resp = peticion_ebay_con_retry(item_url, headers)
@@ -392,12 +391,10 @@ def revisar_y_actualizar_subastas_worker():
                         data = resp.json()
                         precio = float(data.get("currentBidPrice", data.get("price", {})).get("value", 0))
                         bids = int(data.get("bidCount", 0))
-                        # Columna H (final_price_60s), K (bids_60s), N (status)
                         actualizaciones_batch.append({'range': f'H{fila_excel}', 'values': [[precio]]})
                         actualizaciones_batch.append({'range': f'K{fila_excel}', 'values': [[bids]]})
                         actualizaciones_batch.append({'range': f'N{fila_excel}', 'values': [["Monitoreado 60s"]]})
 
-                # Ventana de 2 segundos
                 elif status == "Monitoreado 60s" and -15 <= segundos_restantes <= 10:
                     item_url = f"https://api.ebay.com/buy/browse/v1/item/{item_id}"
                     resp = peticion_ebay_con_retry(item_url, headers)
@@ -405,7 +402,6 @@ def revisar_y_actualizar_subastas_worker():
                         data = resp.json()
                         precio = float(data.get("currentBidPrice", data.get("price", {})).get("value", 0))
                         bids = int(data.get("bidCount", 0))
-                        # Columna I (final_price_2s), L (bids_2s), N (status)
                         actualizaciones_batch.append({'range': f'I{fila_excel}', 'values': [[precio]]})
                         actualizaciones_batch.append({'range': f'L{fila_excel}', 'values': [[bids]]})
                         actualizaciones_batch.append({'range': f'N{fila_excel}', 'values': [["Finalizado"]]})
@@ -421,7 +417,6 @@ def revisar_y_actualizar_subastas_worker():
         logging.error(f"[Error en revisión de subastas] {str(e)}")
 
 def proceso_fondo_matutino_worker():
-    """Volcado matutino a las 12:01 AM (Freeze diario)."""
     try:
         logging.info("--- [INICIO] Proceso Matutino / Freeze Diario ---")
         sheet = obtener_cliente_sheets()
@@ -431,18 +426,7 @@ def proceso_fondo_matutino_worker():
             "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
         }
         
-        ws_listings = sheet.worksheet("Listings")
         ws_auctions = sheet.worksheet("Auctions")
-
-        # Validar cabeceras Listings (A a O)
-        if len(ws_listings.get_all_values()) == 0:
-            ws_listings.update("A1:O1", [[
-                "id_item", "first_seen", "last_seen", "No_Apariciones", "Vendedor", 
-                "Location", "no_psa", "date", "title_card", "price", "Status", 
-                "listing_type", "fmv", "volume_7days", "Link"
-            ]])
-
-        # Validar cabeceras Auctions (A a O)
         if len(ws_auctions.get_all_values()) == 0:
             ws_auctions.update("A1:O1", [[
                 "id_item", "Vendedor", "Location", "no_psa", "date", "title_card", 
@@ -455,11 +439,10 @@ def proceso_fondo_matutino_worker():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Cargar subastas del día que cierran hoy
         offset_auc = 0
         auctions_lote = []
         while offset_auc < 2000:
-            auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:{{AUCTION}},priceCurrency:USD&limit=100&offset={offset_auc}"
+            auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:AUCTION,priceCurrency:USD&limit=100&offset={offset_auc}"
             response = peticion_ebay_con_retry(auction_url, headers)
             if not response or response.status_code != 200:
                 break
@@ -504,6 +487,9 @@ def proceso_fondo_matutino_worker():
             ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
             logging.info(f"[Google Sheets] Registradas {len(auctions_lote)} subastas nuevas para hoy.")
 
+        # Ejecutar en automático también el barrido de listings durante el proceso matutino
+        barrido_listings_incremental_worker()
+
         logging.info("--- [FIN] Proceso Matutino Finalizado ---")
     except Exception as e:
         logging.error(f"[Error Proceso Matutino] {str(e)}")
@@ -516,23 +502,23 @@ with app.app_context():
 
 @app.route("/ping")
 def ping():
-    return "Pong! Servidor activo y adaptado a nuevas columnas.", 200
+    return "Pong! Servidor activo y corregido.", 200
 
 @app.route("/")
 def home():
-    return "Bot de eBay operando con arquitectura avanzada y columnas actualizadas 🚀"
+    return "Bot de eBay operando correctamente con Listings y Auctions sincronizados 🚀"
 
 @app.route("/ejecutar-freeze-diario", methods=["GET"])
 def ejecutar_freeze_diario():
     hilo = threading.Thread(target=proceso_fondo_matutino_worker)
     hilo.start()
-    return jsonify({"status": "success", "message": "Proceso matutino de freeze iniciado."})
+    return jsonify({"status": "success", "message": "Proceso matutino de freeze y listings iniciado."})
 
 @app.route("/actualizar-listings-nuevos", methods=["GET"])
 def actualizar_listings_nuevos():
     hilo = threading.Thread(target=barrido_listings_incremental_worker)
     hilo.start()
-    return jsonify({"status": "success", "message": "Escaneo incremental y control de estado iniciado."})
+    return jsonify({"status": "success", "message": "Escaneo incremental de Listings iniciado en segundo plano."})
 
 @app.route("/verificar-subastas", methods=["GET"])
 def verificar_subastas():
