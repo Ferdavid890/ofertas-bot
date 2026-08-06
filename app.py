@@ -27,13 +27,14 @@ SCOPES = [
 ]
 SPREADSHEET_NAME = "Ebay_App"
 
-# Estructuras en Memoria y Locks de Concurrencia
+# Estructuras en Memoria y Locks con control de tiempo de vida
 CACHE_LOCK = threading.Lock()
 EXECUTION_LOCK = threading.Lock()
+ULTIMO_INICIO_BARRIDO = 0.0
+
 SHEET_CLIENT = None
 SPREADSHEET_OBJ = None
 
-# Caché en memoria para metadatos de Listings y Subastas
 CACHE_LISTINGS_METADATA = {}
 IDS_EXISTENTES_SUBASTAS = set()
 
@@ -42,7 +43,6 @@ EBAY_TOKEN_CACHE = {
     "expires_at": 0.0
 }
 
-# Sesión HTTP reutilizable con Keep-Alive
 http_session = requests.Session()
 
 def obtener_cliente_sheets():
@@ -72,7 +72,6 @@ def obtener_cliente_sheets():
     return SPREADSHEET_OBJ
 
 def inicializar_cache_memoria():
-    """Carga inicial de metadatos de Listings y Subastas en memoria al arrancar."""
     global CACHE_LISTINGS_METADATA, IDS_EXISTENTES_SUBASTAS
     try:
         sheet = obtener_cliente_sheets()
@@ -141,7 +140,7 @@ def obtener_token_ebay():
     }
     body = {
         "grant_type": "client_credentials",
-        "scope": "https://api.ebay.com/oauth/api_scope"
+        "scope": "https://oauth.ebay.com/oauth/api_scope"
     }
 
     response = http_session.post(url, headers=headers, data=body, timeout=10)
@@ -172,7 +171,6 @@ def peticion_ebay_con_retry(url, headers):
                 logging.warning(f"[Error Servidor eBay {response.status_code}]. Reintentando en {tiempo_espera}s...")
                 time.sleep(tiempo_espera)
             else:
-                logging.warning(f"[eBay API Error] Código {response.status_code} para URL: {url} | Respuesta: {response.text}")
                 break
         except requests.exceptions.RequestException as e:
             logging.error(f"[Excepción HTTP] {str(e)}. Reintentando...")
@@ -192,11 +190,9 @@ def extraer_info_vendedor_ubicacion(item):
     return vendedor, location
 
 def buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats):
-    """Rangos Adaptativos calculando páginas reales basadas en el campo total."""
     items_acumulados = []
     limit = 100
     
-    # Filtro corregido y compatible con la API de eBay Browse
     search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD,buyingOptions:FIXED_PRICE&limit={limit}&offset=0"
     stats["consultas_ebay"] += 1
     resp = peticion_ebay_con_retry(search_url, headers)
@@ -207,7 +203,6 @@ def buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats):
     data = resp.json()
     total_resultados = data.get("total", 0)
     
-    # Si supera 2000, dividimos recursivamente a la mitad
     if total_resultados > 2000 and (float(p_max) - float(p_min)) > 1:
         punto_medio = round((float(p_min) + float(p_max)) / 2, 2)
         logging.info(f"[Rangos Adaptativos] [{p_min} - {p_max}] tiene {total_resultados} ítems. Dividiendo en: [{p_min} - {punto_medio}] y [{punto_medio + 0.01} - {p_max}]")
@@ -235,10 +230,21 @@ def buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats):
     return items_acumulados
 
 def barrido_listings_incremental_worker():
+    global ULTIMO_INICIO_BARRIDO
+    
+    # Si el bloqueo lleva más de 10 minutos activo, se asume colgado y se libera a la fuerza
+    if EXECUTION_LOCK.locked():
+        if (time.time() - ULTIMO_INICIO_BARRIDO) > 600:
+            try:
+                EXECUTION_LOCK.release()
+            except Exception:
+                pass
+
     if not EXECUTION_LOCK.acquire(blocking=False):
         logging.warning("[Lock Global] Barrido de listings en ejecución omitido por concurrencia.")
         return
 
+    ULTIMO_INICIO_BARRIDO = time.time()
     tiempo_inicio = time.time()
     stats = {"consultas_ebay": 0, "descargados": 0, "nuevos_agregados": 0, "actualizados": 0}
 
@@ -255,7 +261,6 @@ def barrido_listings_incremental_worker():
         tz_cdmx = timezone(timedelta(hours=-6))
         ahora_str = datetime.now(tz_cdmx).strftime("%Y-%m-%d %H:%M:%S")
 
-        # Asegurar cabeceras si la hoja estuviera vacía
         if len(ws_listings.get_all_values()) == 0:
             ws_listings.update("A1:O1", [[
                 "id_item", "first_seen", "last_seen", "No_Apariciones", "Vendedor", 
@@ -338,7 +343,10 @@ def barrido_listings_incremental_worker():
                     actualizaciones_batch.append({'range': f'K{row_idx}', 'values': [["Vendido"]]})
 
         if actualizaciones_batch:
-            ws_listings.batch_update(actualizaciones_batch)
+            # Dividir batch grande en bloques para evitar límites de la API de Google Sheets
+            chunk_size = 500
+            for i in range(0, len(actualizaciones_batch), chunk_size):
+                ws_listings.batch_update(actualizaciones_batch[i:i + chunk_size])
 
         tiempo_total = time.time() - tiempo_inicio
         logging.info(f"--- [FIN] Barrido completado en {tiempo_total:.2f}s --- | Métricas: {stats}")
@@ -346,7 +354,10 @@ def barrido_listings_incremental_worker():
     except Exception as e:
         logging.error(f"[Error Crítico en Barrido Listings] {str(e)}")
     finally:
-        EXECUTION_LOCK.release()
+        try:
+            EXECUTION_LOCK.release()
+        except Exception:
+            pass
 
 def revisar_y_actualizar_subastas_worker():
     try:
@@ -487,7 +498,7 @@ def proceso_fondo_matutino_worker():
             ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
             logging.info(f"[Google Sheets] Registradas {len(auctions_lote)} subastas nuevas para hoy.")
 
-        # Ejecutar en automático también el barrido de listings durante el proceso matutino
+        # Disparar barrido de listings de forma segura
         barrido_listings_incremental_worker()
 
         logging.info("--- [FIN] Proceso Matutino Finalizado ---")
@@ -502,11 +513,11 @@ with app.app_context():
 
 @app.route("/ping")
 def ping():
-    return "Pong! Servidor activo y corregido.", 200
+    return "Pong! Servidor activo y seguro ante bloqueos.", 200
 
 @app.route("/")
 def home():
-    return "Bot de eBay operando correctamente con Listings y Auctions sincronizados 🚀"
+    return "Bot de eBay operando correctamente con control robusto de concurrencia 🚀"
 
 @app.route("/ejecutar-freeze-diario", methods=["GET"])
 def ejecutar_freeze_diario():
