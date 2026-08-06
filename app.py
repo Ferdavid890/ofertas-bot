@@ -138,9 +138,9 @@ def obtener_token_ebay():
         "Content-Type": "application/x-www-form-urlencoded",
         "Authorization": f"Basic {encoded_credentials}"
     }
+    # Se elimina el parámetro scope restrictivo para que use el scope por defecto asignado a las App Keys
     body = {
-        "grant_type": "client_credentials",
-        "scope": "https://oauth.ebay.com/oauth/api_scope"
+        "grant_type": "client_credentials"
     }
 
     response = http_session.post(url, headers=headers, data=body, timeout=10)
@@ -232,7 +232,6 @@ def buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats):
 def barrido_listings_incremental_worker():
     global ULTIMO_INICIO_BARRIDO
     
-    # Si el bloqueo lleva más de 10 minutos activo, se asume colgado y se libera a la fuerza
     if EXECUTION_LOCK.locked():
         if (time.time() - ULTIMO_INICIO_BARRIDO) > 600:
             try:
@@ -343,7 +342,6 @@ def barrido_listings_incremental_worker():
                     actualizaciones_batch.append({'range': f'K{row_idx}', 'values': [["Vendido"]]})
 
         if actualizaciones_batch:
-            # Dividir batch grande en bloques para evitar límites de la API de Google Sheets
             chunk_size = 500
             for i in range(0, len(actualizaciones_batch), chunk_size):
                 ws_listings.batch_update(actualizaciones_batch[i:i + chunk_size])
@@ -498,7 +496,6 @@ def proceso_fondo_matutino_worker():
             ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
             logging.info(f"[Google Sheets] Registradas {len(auctions_lote)} subastas nuevas para hoy.")
 
-        # Disparar barrido de listings de forma segura
         barrido_listings_incremental_worker()
 
         logging.info("--- [FIN] Proceso Matutino Finalizado ---")
