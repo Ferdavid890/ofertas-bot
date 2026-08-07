@@ -365,9 +365,9 @@ def revisar_y_actualizar_subastas_worker():
     except Exception as e:
         logging.error(f"[Error revisión subastas] {str(e)}")
 
-def proceso_fondo_matutino_worker():
+def proceso_solo_subastas_worker():
     try:
-        logging.info("--- [INICIO] Proceso de Subastas (Cierre Hoy CDMX) ---")
+        logging.info("--- [INICIO] Proceso Exclusivo de Subastas (Cierre Hoy CDMX) ---")
         sheet = obtener_cliente_sheets()
         token = obtener_token_ebay()
         headers = {
@@ -438,10 +438,9 @@ def proceso_fondo_matutino_worker():
             ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
             logging.info(f"[Google Sheets] Registradas {len(auctions_lote)} subastas que cierran hoy.")
         else:
-            logging.info("[Google Sheets] No hay subastas que cierren hoy en este momento.")
+            logging.info("[Google Sheets] No hay subastas que cierran hoy en este momento.")
 
-        barrido_listings_incremental_worker()
-        logging.info("--- [FIN] Proceso Finalizado ---")
+        logging.info("--- [FIN] Proceso Exclusivo de Subastas Finalizado ---")
     except Exception as e:
         logging.error(f"[Error Proceso Subastas] {str(e)}")
 
@@ -461,9 +460,19 @@ def home():
 
 @app.route("/ejecutar-freeze-diario", methods=["GET"])
 def ejecutar_freeze_diario():
-    hilo = threading.Thread(target=proceso_fondo_matutino_worker)
+    # Este mantiene ambos (por si lo necesitas en el cron job)
+    def proceso_completo():
+        proceso_solo_subastas_worker()
+        barrido_listings_incremental_worker()
+    hilo = threading.Thread(target=proceso_completo)
     hilo.start()
-    return jsonify({"status": "success", "message": "Proceso de subastas y listings iniciado."})
+    return jsonify({"status": "success", "message": "Proceso completo (subastas + listings) iniciado."})
+
+@app.route("/ejecutar-solo-subastas", methods=["GET"])
+def ejecutar_solo_subastas():
+    hilo = threading.Thread(target=proceso_solo_subastas_worker)
+    hilo.start()
+    return jsonify({"status": "success", "message": "Proceso exclusivo de subastas iniciado."})
 
 @app.route("/actualizar-listings-nuevos", methods=["GET"])
 def actualizar_listings_nuevos():
