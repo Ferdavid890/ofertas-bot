@@ -191,13 +191,12 @@ def extraer_info_vendedor_ubicacion(item):
         location = "Estados Unidos"
     return vendedor, location
 
-def buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats):
-    """Rangos Adaptativos calculando páginas reales basadas en el campo total."""
+def buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats, buying_option="FIXED_PRICE"):
+    """Rangos Adaptativos calculando páginas reales basadas en el campo total para Listings o Subastas."""
     items_acumulados = []
     limit = 100
     
-    # Filtro corregido y compatible con la API de eBay Browse
-    search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD,buyingOptions:FIXED_PRICE&limit={limit}&offset=0"
+    search_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD,buyingOptions:{buying_option}&limit={limit}&offset=0"
     stats["consultas_ebay"] += 1
     resp = peticion_ebay_con_retry(search_url, headers)
     
@@ -207,12 +206,11 @@ def buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats):
     data = resp.json()
     total_resultados = data.get("total", 0)
     
-    # Si supera 2000, dividimos recursivamente a la mitad
     if total_resultados > 2000 and (float(p_max) - float(p_min)) > 1:
         punto_medio = round((float(p_min) + float(p_max)) / 2, 2)
-        logging.info(f"[Rangos Adaptativos] [{p_min} - {p_max}] tiene {total_resultados} ítems. Dividiendo en: [{p_min} - {punto_medio}] y [{punto_medio + 0.01} - {p_max}]")
-        items_acumulados.extend(buscar_ebay_recursivo_adaptativo(p_min, str(punto_medio), headers, stats))
-        items_acumulados.extend(buscar_ebay_recursivo_adaptativo(str(punto_medio + 0.01), p_max, headers, stats))
+        logging.info(f"[Rangos Adaptativos {buying_option}] [{p_min} - {p_max}] tiene {total_resultados} ítems. Dividiendo en: [{p_min} - {punto_medio}] y [{punto_medio + 0.01} - {p_max}]")
+        items_acumulados.extend(buscar_ebay_recursivo_adaptativo(p_min, str(punto_medio), headers, stats, buying_option))
+        items_acumulados.extend(buscar_ebay_recursivo_adaptativo(str(punto_medio + 0.01), p_max, headers, stats, buying_option))
         return items_acumulados
 
     items_acumulados.extend(data.get("itemSummaries", []))
@@ -222,7 +220,7 @@ def buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats):
         offset = page * limit
         if offset >= 2000:
             break
-        paged_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD,buyingOptions:FIXED_PRICE&limit={limit}&offset={offset}"
+        paged_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=price:[{p_min}..{p_max}],priceCurrency:USD,buyingOptions:{buying_option}&limit={limit}&offset={offset}"
         stats["consultas_ebay"] += 1
         resp = peticion_ebay_con_retry(paged_url, headers)
         if not resp or resp.status_code != 200:
@@ -255,7 +253,6 @@ def barrido_listings_incremental_worker():
         tz_cdmx = timezone(timedelta(hours=-6))
         ahora_str = datetime.now(tz_cdmx).strftime("%Y-%m-%d %H:%M:%S")
 
-        # Asegurar cabeceras si la hoja estuviera vacía
         if len(ws_listings.get_all_values()) == 0:
             ws_listings.update("A1:O1", [[
                 "id_item", "first_seen", "last_seen", "No_Apariciones", "Vendedor", 
@@ -273,7 +270,7 @@ def barrido_listings_incremental_worker():
         actualizaciones_batch = []
 
         for p_min, p_max in rangos_base:
-            items_rango = buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats)
+            items_rango = buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats, buying_option="FIXED_PRICE")
             stats["descargados"] += len(items_rango)
 
             for item in items_rango:
@@ -418,7 +415,7 @@ def revisar_y_actualizar_subastas_worker():
 
 def proceso_fondo_matutino_worker():
     try:
-        logging.info("--- [INICIO] Proceso Matutino / Freeze Diario ---")
+        logging.info("--- [INICIO] Proceso Matutino / Freeze Diario de Subastas y Listings ---")
         sheet = obtener_cliente_sheets()
         token = obtener_token_ebay()
         headers = {
@@ -439,19 +436,19 @@ def proceso_fondo_matutino_worker():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        offset_auc = 0
-        auctions_lote = []
-        while offset_auc < 2000:
-            auction_url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:AUCTION,priceCurrency:USD&limit=100&offset={offset_auc}"
-            response = peticion_ebay_con_retry(auction_url, headers)
-            if not response or response.status_code != 200:
-                break
-            data = response.json()
-            items = data.get("itemSummaries", [])
-            if not items:
-                break
+        rangos_base = [
+            ("0", "150"), ("151", "400"), ("401", "800"), 
+            ("801", "1500"), ("1501", "3000"), ("3001", "999999")
+        ]
 
-            for item in items:
+        auctions_lote = []
+        stats_auc = {"consultas_ebay": 0}
+
+        # Aplicamos la búsqueda adaptativa recursiva para subastas asegurando cobertura total
+        for p_min, p_max in rangos_base:
+            items_rango = buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats_auc, buying_option="AUCTION")
+            
+            for item in items_rango:
                 item_end_time = item.get("itemEndDate", "")
                 if item_end_time:
                     try:
@@ -478,10 +475,6 @@ def proceso_fondo_matutino_worker():
                                     ])
                     except Exception:
                         continue
-
-            if len(items) < 100:
-                break
-            offset_auc += 100
 
         if auctions_lote:
             ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
@@ -528,5 +521,3 @@ def verificar_subastas():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
-
