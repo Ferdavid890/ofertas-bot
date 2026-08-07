@@ -48,7 +48,8 @@ class EbayAuthManager:
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Authorization": f"Basic {encoded}"
             }
-            body = {"grant_type": "client_credentials", "scope": "https://oauth/api_scope"}
+            # Se elimina el scope para evitar errores de validación en la Browse API
+            body = {"grant_type": "client_credentials"}
 
             resp = self.session.post(url, headers=headers, data=body, timeout=10)
             if resp.status_code == 200:
@@ -168,7 +169,6 @@ search_engine = EbaySearchEngine()
 
 # ----------------------------------------------------
 # ENDPOINT 1: LISTINGS (Buy It Now)
-# Columnas en Sheets: id_item | first_seen | last_seen | No_Apariciones | Vendedor | Location | no_psa | date | title_card | price | Status | listing_type | fmv | volume_7days | Link
 # ----------------------------------------------------
 @app.route("/ejecutar-listings", methods=["GET"])
 def endpoint_ejecutar_listings():
@@ -186,18 +186,12 @@ def endpoint_ejecutar_listings():
         sheet = sheets_manager.conectar()
         ws = sheet.worksheet("Listings")
         
-        # Leemos los datos actuales de la hoja para comparar
         registros = ws.get_all_records()
-        
-        # Mapeo por id_item para saber si ya existe en el día en curso
-        filas_a_actualizar = []
         ids_existentes_hoy = set()
         
-        for idx, row in enumerate(registros, start=2): # Fila 2 en adelante
+        for row in registros:
             item_id = str(row.get("id_item", ""))
             row_date = str(row.get("date", ""))
-            
-            # Si el item existe y pertenece al día actual
             if row_date.startswith(fecha_solo_dia):
                 ids_existentes_hoy.add(item_id)
 
@@ -209,10 +203,8 @@ def endpoint_ejecutar_listings():
             vendedor, location = MarketAnalyzer.extraer_info_vendedor_ubicacion(it)
             
             if item_id in ids_existentes_hoy:
-                # Si ya está registrado hoy, no duplicamos, solo pasa desapercibido en el append masivo pero actualizamos el last_seen si fuera necesario
                 continue
             else:
-                # Nuevo registro para la foto del día (Snapshot o aparición nueva en el día)
                 filas_nuevas.append([
                     item_id, ahora_str, ahora_str, 1, vendedor, location,
                     "PSA 10", ahora_str, title, price, "Activo", "Buy It Now", price, 0, url
@@ -231,7 +223,6 @@ def endpoint_ejecutar_listings():
 
 # ----------------------------------------------------
 # ENDPOINT 2: AUCTIONS (Carga diaria + Monitoreo 60s y 2s)
-# Columnas en Sheets: id_item | Vendedor | Location | no_psa | date | title_card | initial_price | final_price_60s | final_price_2s | bids | bids_60s | bids_2s | scheduled_closing_time | status | Link
 # ----------------------------------------------------
 @app.route("/ejecutar-subastas", methods=["GET"])
 def endpoint_ejecutar_subastas():
@@ -258,23 +249,20 @@ def endpoint_ejecutar_subastas():
         filas_nuevas = []
         
         for item_id, it in items.items():
-            # Obtener detalle completo para la fecha de cierre exacta (itemEndDate)
             detalle_resp = ebay_auth.peticion_con_retry(f"https://api.ebay.com/buy/browse/v1/item_summary/{item_id}", headers)
             if not detalle_resp or detalle_resp.status_code != 200:
                 continue
             
             detalle = detalle_resp.json()
-            closing_time_str = detalle.get("itemEndDate", "") # Formato ISO 8601 ej: 2026-06-06T20:00:00.000Z
+            closing_time_str = detalle.get("itemEndDate", "")
             
             if not closing_time_str:
                 continue
                 
-            # Convertir closing time a objeto datetime UTC y luego a CDMX
             dt_cierre_utc = datetime.fromisoformat(closing_time_str.replace("Z", "+00:00"))
             dt_cierre_cdmx = dt_cierre_utc.astimezone(tz_cdmx)
             closing_date_str = dt_cierre_cdmx.strftime("%Y-%m-%d")
             
-            # Filtro estricto: Solo subastas que cierran HOY
             if closing_date_str != hoy_str:
                 continue
 
@@ -284,33 +272,28 @@ def endpoint_ejecutar_subastas():
             vendedor, location = MarketAnalyzer.extraer_info_vendedor_ubicacion(it)
             bids_iniciales = it.get("bidCount", 0)
             
-            # Si la subasta ya existe en la hoja, evaluamos si estamos en ventana de T-60s o T-2s
             if item_id in ids_en_sheet:
                 row_num, row_data = ids_en_sheet[item_id]
                 status_actual = row_data.get("status", "")
                 
                 if status_actual == "Finalizado":
-                    continue # Ya terminó, no hay nada que hacer
+                    continue
                 
-                # Calcular cuántos segundos faltan para el cierre
                 segundos_para_cierre = (dt_cierre_utc - datetime.now(timezone.utc)).total_seconds()
                 
-                # Ventana T-60 segundos (ej. entre 50 y 70 segundos antes)
                 if 45 <= segundos_para_cierre <= 75 and status_actual != "Monitoreado":
-                    ws.update_cell(row_num, 8, precio_inicial) # final_price_60s (columna H aprox)
-                    ws.update_cell(row_num, 11, bids_iniciales) # bids_60s
-                    ws.update_cell(row_num, 14, "Monitoreado") # status
+                    ws.update_cell(row_num, 8, precio_inicial)
+                    ws.update_cell(row_num, 11, bids_iniciales)
+                    ws.update_cell(row_num, 14, "Monitoreado")
                     logging.info(f"[Sniper T-60s] Subasta {item_id} actualizada a Monitoreado.")
                 
-                # Ventana T-2 segundos (ej. menos de 5 segundos para el cierre o ya cerrado)
                 elif segundos_para_cierre <= 5:
-                    ws.update_cell(row_num, 9, precio_inicial) # final_price_2s (columna I)
-                    ws.update_cell(row_num, 12, bids_iniciales) # bids_2s
-                    ws.update_cell(row_num, 14, "Finalizado") # status
+                    ws.update_cell(row_num, 9, precio_inicial)
+                    ws.update_cell(row_num, 12, bids_iniciales)
+                    ws.update_cell(row_num, 14, "Finalizado")
                     logging.info(f"[Sniper T-2s] Subasta {item_id} finalizada y registrada.")
             
             else:
-                # Es una subasta nueva detectada que cierra hoy, se inserta limpia
                 filas_nuevas.append([
                     item_id, vendedor, location, "PSA 10", hoy_str, title,
                     precio_inicial, "", "", bids_iniciales, "", "", closing_time_str, "Activo", url
