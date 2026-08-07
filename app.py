@@ -192,7 +192,7 @@ def extraer_info_vendedor_ubicacion(item):
     return vendedor, location
 
 def buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats, buying_option="FIXED_PRICE"):
-    """Rangos Adaptativos calculando páginas reales basadas en el campo total para Listings o Subastas."""
+    """Rangos Adaptativos calculando páginas reales basadas en el campo total para Listings."""
     items_acumulados = []
     limit = 100
     
@@ -230,6 +230,39 @@ def buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats, buying_option
             break
         items_acumulados.extend(items)
 
+    return items_acumulados
+
+def buscar_auctions_hoy(headers, stats):
+    """Búsqueda directa de subastas por fecha de cierre (Sin filtros de precio)."""
+    items_acumulados = []
+    limit = 100
+    hoy_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    url_base = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q=Lorcana+PSA+10&filter=buyingOptions:AUCTION,endTime:[{hoy_str}T00:00:00Z..{hoy_str}T23:59:59Z]&limit={limit}&offset="
+    
+    stats["consultas_ebay"] += 1
+    resp = peticion_ebay_con_retry(url_base + "0", headers)
+    if not resp or resp.status_code != 200:
+        return items_acumulados
+
+    data = resp.json()
+    items_acumulados.extend(data.get("itemSummaries", []))
+    
+    total = data.get("total", 0)
+    paginas_totales = ceil(total / limit) if total > 0 else 1
+    
+    for page in range(1, min(paginas_totales, 20)):  # Tope de seguridad de 2000 items
+        offset = page * limit
+        stats["consultas_ebay"] += 1
+        resp = peticion_ebay_con_retry(url_base + str(offset), headers)
+        if resp and resp.status_code == 200:
+            items = resp.json().get("itemSummaries", [])
+            if not items:
+                break
+            items_acumulados.extend(items)
+        else:
+            break
+            
     return items_acumulados
 
 def barrido_listings_incremental_worker():
@@ -436,45 +469,41 @@ def proceso_fondo_matutino_worker():
         hoy_cdmx_str = ahora_cdmx.strftime("%Y-%m-%d")
         fecha_registro_actual = ahora_cdmx.strftime("%Y-%m-%d %H:%M:%S")
 
-        rangos_base = [
-            ("0", "150"), ("151", "400"), ("401", "800"), 
-            ("801", "1500"), ("1501", "3000"), ("3001", "999999")
-        ]
-
         auctions_lote = []
         stats_auc = {"consultas_ebay": 0}
 
-        # Aplicamos la búsqueda adaptativa recursiva para subastas asegurando cobertura total
-        for p_min, p_max in rangos_base:
-            items_rango = buscar_ebay_recursivo_adaptativo(p_min, p_max, headers, stats_auc, buying_option="AUCTION")
-            
-            for item in items_rango:
-                item_end_time = item.get("itemEndDate", "")
-                if item_end_time:
-                    try:
-                        dt_utc = datetime.fromisoformat(item_end_time.replace("Z", "+00:00"))
-                        dt_cdmx = dt_utc.astimezone(tz_cdmx)
-                        if dt_cdmx.strftime("%Y-%m-%d") == hoy_cdmx_str:
-                            item_id = str(item.get("itemId", "")).strip()
-                            if item_id:
+        # Búsqueda optimizada de subastas SIN rangos de precios, trayendo todo lo que cierra hoy
+        logging.info("[Proceso Matutino] Descargando subastas de hoy mediante búsqueda directa...")
+        items_auctions = buscar_auctions_hoy(headers, stats_auc)
+        
+        for item in items_auctions:
+            item_end_time = item.get("itemEndDate", "")
+            if item_end_time:
+                try:
+                    dt_utc = datetime.fromisoformat(item_end_time.replace("Z", "+00:00"))
+                    dt_cdmx = dt_utc.astimezone(tz_cdmx)
+                    if dt_cdmx.strftime("%Y-%m-%d") == hoy_cdmx_str:
+                        item_id = str(item.get("itemId", "")).strip()
+                        if item_id:
+                            with CACHE_LOCK:
+                                existe = item_id in IDS_EXISTENTES_SUBASTAS
+                            
+                            if not existe:
                                 with CACHE_LOCK:
-                                    existe = item_id in IDS_EXISTENTES_SUBASTAS
-                                
-                                if not existe:
                                     IDS_EXISTENTES_SUBASTAS.add(item_id)
-                                    title = item.get("title", "")
-                                    item_url = item.get("itemWebUrl", "")
-                                    current_bid = float(item.get("currentBidPrice", item.get("price", {})).get("value", 0))
-                                    bids_count = int(item.get("bidCount", 0))
-                                    cierre_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
-                                    vendedor, location = extraer_info_vendedor_ubicacion(item)
+                                title = item.get("title", "")
+                                item_url = item.get("itemWebUrl", "")
+                                current_bid = float(item.get("currentBidPrice", item.get("price", {})).get("value", 0))
+                                bids_count = int(item.get("bidCount", 0))
+                                cierre_str = dt_cdmx.strftime("%Y-%m-%d %H:%M:%S")
+                                vendedor, location = extraer_info_vendedor_ubicacion(item)
 
-                                    auctions_lote.append([
-                                        item_id, vendedor, location, "PSA 10", fecha_registro_actual, title, 
-                                        current_bid, 0.0, 0.0, bids_count, 0, 0, cierre_str, "Activa", item_url
-                                    ])
-                    except Exception:
-                        continue
+                                auctions_lote.append([
+                                    item_id, vendedor, location, "PSA 10", fecha_registro_actual, title, 
+                                    current_bid, 0.0, 0.0, bids_count, 0, 0, cierre_str, "Activa", item_url
+                                ])
+                except Exception:
+                    continue
 
         if auctions_lote:
             ws_auctions.append_rows(auctions_lote, value_input_option='USER_ENTERED')
