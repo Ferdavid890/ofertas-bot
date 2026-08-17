@@ -513,7 +513,7 @@ def sync_listings():
             ws = sheets_manager.worksheet("Listings")
             registros = sheets_manager.get_all_records(ws, expected_headers=LISTINGS_HEADERS)
 
-        # Filas de HOY: id_item -> (row_num, No_Apariciones actual, price actual)
+        # Filas de HOY: id_item -> (row_num, No_Apariciones actual, price actual, status actual)
         filas_hoy = {}
         for i, r in enumerate(registros):
             if str(r.get("date", "")).startswith(fecha_solo_dia):
@@ -526,7 +526,7 @@ def sync_listings():
                     precio_actual = float(r.get("price", 0) or 0)
                 except (TypeError, ValueError):
                     precio_actual = 0.0
-                filas_hoy[item_id] = (i + 2, apariciones, precio_actual)
+                filas_hoy[item_id] = (i + 2, apariciones, precio_actual, r.get("Status", ""))
 
         filas_nuevas = []
         actualizaciones = []
@@ -541,7 +541,9 @@ def sync_listings():
 
             if item_id in filas_hoy:
                 # Ya lo vimos hoy: actualizar last_seen, No_Apariciones y asegurar status Activo
-                row_num, apariciones, precio_anterior = filas_hoy[item_id]
+                # (esto tambien "rescata" un item que hubiera quedado en Pendiente_Verificar
+                # por una falta anterior - si vuelve a aparecer, se resetea a Activo normal)
+                row_num, apariciones, precio_anterior, _status_anterior = filas_hoy[item_id]
                 actualizaciones.append({"range": gspread.utils.rowcol_to_a1(row_num, COL_LAST_SEEN), "values": [[ahora_str]]})
                 actualizaciones.append({"range": gspread.utils.rowcol_to_a1(row_num, COL_NO_APARICIONES), "values": [[apariciones + 1]]})
                 actualizaciones.append({"range": gspread.utils.rowcol_to_a1(row_num, COL_LISTING_STATUS), "values": [["Activo"]]})
@@ -560,10 +562,23 @@ def sync_listings():
                 "PSA 10", ahora_str, title, price_nuevo, "Activo", "Buy It Now", price_nuevo, 0, url
             ])
 
-        # Los que tenian fila hoy pero ya NO aparecieron en esta busqueda: marcar Vendido
-        for item_id, (row_num, _, _) in filas_hoy.items():
+        # Los que tenian fila hoy pero ya NO aparecieron en esta busqueda: en vez de marcar
+        # Vendido de inmediato (1 sola falta), se da un periodo de gracia de 1 corrida extra.
+        # Motivo: con "newlyListed" como orden y un tope de MAX_ITEMS_POR_QUERY resultados,
+        # si una corrida tarda mas de lo normal (ej. mas queries/categorias, o eBay lento),
+        # un listing que sigue activo puede quedar temporalmente fuera de la ventana de "mas
+        # recientes" sin haberse vendido de verdad. Confirmado en produccion (17-ago-2026):
+        # tras ampliar a 2 categorias, la corrida tardo mas y varios listings activos se
+        # marcaron Vendido en una sola pasada por este motivo. Con el periodo de gracia,
+        # solo se confirma Vendido si el item falta 2 veces SEGUIDAS (aprox. 1-2 horas de
+        # margen real, ya que sync_listings corre cada hora) - si reaparece en la corrida
+        # intermedia, se resetea a Activo automaticamente (ver arriba).
+        for item_id, (row_num, _, _, status_anterior) in filas_hoy.items():
             if item_id not in encontrados_hoy:
-                actualizaciones.append({"range": gspread.utils.rowcol_to_a1(row_num, COL_LISTING_STATUS), "values": [["Vendido"]]})
+                if status_anterior == "Pendiente_Verificar":
+                    actualizaciones.append({"range": gspread.utils.rowcol_to_a1(row_num, COL_LISTING_STATUS), "values": [["Vendido"]]})
+                else:
+                    actualizaciones.append({"range": gspread.utils.rowcol_to_a1(row_num, COL_LISTING_STATUS), "values": [["Pendiente_Verificar"]]})
 
         if filas_nuevas:
             with SHEETS_LOCK:
@@ -577,7 +592,9 @@ def sync_listings():
                 sheets_manager.append_rows(ws_hist, historial_precios)
 
         vendidos = sum(1 for a in actualizaciones if a["values"][0][0] == "Vendido")
-        log.info(f"[Listings] Nuevos: {len(filas_nuevas)} | Actualizados: {len(filas_hoy) - vendidos} | Marcados Vendido: {vendidos} | "
+        pendientes_verificar = sum(1 for a in actualizaciones if a["values"][0][0] == "Pendiente_Verificar")
+        log.info(f"[Listings] Nuevos: {len(filas_nuevas)} | Actualizados: {len(filas_hoy) - vendidos - pendientes_verificar} | "
+                 f"Pendiente_Verificar (1ra falta): {pendientes_verificar} | Marcados Vendido (2da falta confirmada): {vendidos} | "
                  f"Cambios de precio: {len(historial_precios)} | eBay total_reportado: {stats['total_reportado']} | items validos tras filtro: {len(items)} | Duracion: {round(time.time()-inicio,1)}s")
     except Exception as e:
         log.error(f"[Listings] Error: {e}", exc_info=True)
@@ -627,6 +644,15 @@ def verificar_venta_real(item_id_completo):
             log.warning(f"[VerificarVenta] GetItem Ack={ack} item={legacy_id}: {errores}")
             return None
 
+        listing_status = root.findtext("e:Item/e:SellingStatus/e:ListingStatus", default="", namespaces=ns)
+        if listing_status == "Active":
+            # El item sigue realmente activo en eBay - la marca "Vendido" en nuestro Sheet
+            # fue un falso positivo (ej. una corrida con busqueda vacia por error). No es
+            # ni Sold ni Ended: devolvemos un valor especial para que sync_listings pueda
+            # corregir el Status de vuelta a Activo la proxima vez que lo encuentre, en vez
+            # de dejar una etiqueta Sold/Ended incorrecta pegada permanentemente.
+            return "Sigue_Activo"
+
         qty_sold_txt = root.findtext("e:Item/e:SellingStatus/e:QuantitySold", default=None, namespaces=ns)
         if qty_sold_txt is None:
             return "Desconocido"
@@ -665,12 +691,23 @@ def verificar_ventas_pendientes():
             return
 
         actualizaciones = []
+        corregidos_a_activo = 0
         for row_num, r in pendientes:
             item_id = r.get("id_item")
             if not item_id:
                 continue
             resultado = verificar_venta_real(item_id)
-            if resultado:
+            if resultado == "Sigue_Activo":
+                # Falso "Vendido" (ej. una corrida con busqueda vacia por error de la API) -
+                # el item sigue realmente activo en eBay. Se corrige el Status, no se toca
+                # venta_confirmada (se deja vacio para que se verifique de verdad cuando
+                # eventualmente se venda o se de de baja de verdad).
+                actualizaciones.append({
+                    "range": gspread.utils.rowcol_to_a1(row_num, COL_LISTING_STATUS),
+                    "values": [["Activo"]]
+                })
+                corregidos_a_activo += 1
+            elif resultado:
                 actualizaciones.append({
                     "range": gspread.utils.rowcol_to_a1(row_num, COL_VENTA_CONFIRMADA),
                     "values": [[resultado]]
@@ -681,7 +718,8 @@ def verificar_ventas_pendientes():
             with SHEETS_LOCK:
                 sheets_manager.batch_update_raw(ws, actualizaciones)
 
-        log.info(f"[VerificarVenta] Revisados {len(pendientes)} | Confirmados {len(actualizaciones)} "
+        log.info(f"[VerificarVenta] Revisados {len(pendientes)} | Confirmados {len(actualizaciones) - corregidos_a_activo} "
+                 f"| Corregidos de vuelta a Activo (falso Vendido): {corregidos_a_activo} "
                  f"| el resto (si quedo) se procesa en la siguiente corrida")
     except Exception as e:
         log.error(f"[VerificarVenta] Error: {e}", exc_info=True)
