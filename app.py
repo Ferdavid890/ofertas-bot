@@ -349,10 +349,18 @@ class EbaySearchEngine:
 # Configuracion de busqueda SEPARADA para cada job, para que ajustar una no afecte
 # accidentalmente a la otra:
 QUERIES_LISTINGS = ['Lorcana "PSA 10"', 'Lorcana PSA10', 'Lorcana "Gem Mint 10"']
-CATEGORY_LISTINGS = "&category_ids=183454"  # Disney Collectible Individual Card Games
+# 183454 = CCG Individual Cards (Toys&Hobbies>Collectible Card Games) - la que ya teniamos.
+# 183050 = Non-Sport Trading Card Singles (Collectibles>Non-Sport Trading Cards) - AGREGADA
+# 16-ago-2026: confirmado con un caso real (item 298568492420, vendedor "PSA" oficial via
+# PSA Vault) que listings legitimos de Lorcana caen en esta categoria y NO en 183454 -
+# se estaban perdiendo por completo, sin importar que el titulo matcheara perfecto.
+# Browse API acepta varias category_ids separadas por coma en un solo filtro (no cuesta
+# llamada extra). Ambas categorias son las 2 oficiales para trading cards individuales
+# segun la doc de Authenticity Guarantee de eBay - no hay una tercera a cubrir.
+CATEGORY_LISTINGS = "&category_ids=183454,183050"
 
 QUERIES_AUCTIONS = ['Lorcana "PSA 10"', 'Lorcana PSA10', 'Lorcana "Gem Mint 10"']  # 3 variantes: ya no es caro por query gracias al fix de itemEndDate
-CATEGORY_AUCTIONS = "&category_ids=183454"  # CCG Individual Cards - confirmado que eBay.com usa esta misma categoria en su propia busqueda web (363 resultados reales vs 3778 sin categoria)
+CATEGORY_AUCTIONS = "&category_ids=183454,183050"
 
 
 # ======================================================
