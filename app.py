@@ -336,13 +336,15 @@ class EbaySearchEngine:
             f"buyingOptions:{{{buying_option}}}{extra_filter}&sort={sort_order}&limit={self.LIMIT}&offset={offset}"
         )
 
-    def ejecutar_motor_general(self, buying_option, sort_order, queries, category_param="", extra_filter="", max_items=None):
+    def ejecutar_motor_general(self, buying_option, sort_order, queries, category_params=None, extra_filter="", max_items=None):
         stats = {"total_reportado": 0}
         todos_items = {}
+        categorias = category_params if category_params else [""]
         for q in queries:
-            for r in self.RANGOS:
-                resultados = self.buscar_recursivo(q, r[0], r[1], sort_order, buying_option, stats, category_param, extra_filter, max_items)
-                todos_items.update(resultados)
+            for cat in categorias:
+                for r in self.RANGOS:
+                    resultados = self.buscar_recursivo(q, r[0], r[1], sort_order, buying_option, stats, cat, extra_filter, max_items)
+                    todos_items.update(resultados)
         return todos_items, stats
 
 
@@ -351,16 +353,20 @@ class EbaySearchEngine:
 QUERIES_LISTINGS = ['Lorcana "PSA 10"', 'Lorcana PSA10', 'Lorcana "Gem Mint 10"']
 # 183454 = CCG Individual Cards (Toys&Hobbies>Collectible Card Games) - la que ya teniamos.
 # 183050 = Non-Sport Trading Card Singles (Collectibles>Non-Sport Trading Cards) - AGREGADA
-# 16-ago-2026: confirmado con un caso real (item 298568492420, vendedor "PSA" oficial via
-# PSA Vault) que listings legitimos de Lorcana caen en esta categoria y NO en 183454 -
-# se estaban perdiendo por completo, sin importar que el titulo matcheara perfecto.
-# Browse API acepta varias category_ids separadas por coma en un solo filtro (no cuesta
-# llamada extra). Ambas categorias son las 2 oficiales para trading cards individuales
-# segun la doc de Authenticity Guarantee de eBay - no hay una tercera a cubrir.
-CATEGORY_LISTINGS = "&category_ids=183454,183050"
+# 17-ago-2026: confirmado con 3 casos reales (items 298568492420, 398260946266,
+# 377408977233 - vendedores PSA y Probstein Auctions) que listings legitimos de Lorcana
+# caen en esta categoria y NO en 183454 - se estaban perdiendo por completo, sin importar
+# que el titulo matcheara perfecto.
+# OJO: eBay Browse API NO acepta varias category_ids separadas por coma en un solo filtro
+# (error real: "The number of categories in the request has exceeded the limit. Please
+# reduce the number of categories to 1 or less.") - hay que hacer una llamada POR
+# categoria y combinar resultados (ejecutar_motor_general ya lo hace, dedup automatico
+# por id_item). Esto duplica el numero de llamadas/paginas por query - ver nota de cuota
+# mas abajo si el uso diario sube mucho.
+CATEGORY_LISTINGS = ["&category_ids=183454", "&category_ids=183050"]
 
 QUERIES_AUCTIONS = ['Lorcana "PSA 10"', 'Lorcana PSA10', 'Lorcana "Gem Mint 10"']  # 3 variantes: ya no es caro por query gracias al fix de itemEndDate
-CATEGORY_AUCTIONS = "&category_ids=183454,183050"
+CATEGORY_AUCTIONS = ["&category_ids=183454", "&category_ids=183050"]
 
 
 # ======================================================
@@ -499,7 +505,7 @@ def sync_listings():
     inicio = time.time()
     log.info("[Listings] Iniciando sincronizacion")
     try:
-        items, stats = search_engine.ejecutar_motor_general("FIXED_PRICE", "newlyListed", queries=QUERIES_LISTINGS, category_param=CATEGORY_LISTINGS)
+        items, stats = search_engine.ejecutar_motor_general("FIXED_PRICE", "newlyListed", queries=QUERIES_LISTINGS, category_params=CATEGORY_LISTINGS)
         ahora_str = datetime.now(TZ_CDMX).strftime("%Y-%m-%d %H:%M:%S")
         fecha_solo_dia = datetime.now(TZ_CDMX).strftime("%Y-%m-%d")
 
@@ -755,7 +761,7 @@ def sync_auctions():
         # si funcionaba. Si un item no trae itemEndDate en el resumen de busqueda, se
         # descarta directamente (sin pedir su detalle aparte) - eso es lo que mas cuota
         # nos estaba costando antes.
-        items, stats = search_engine.ejecutar_motor_general("AUCTION", "endingSoonest", queries=QUERIES_AUCTIONS, category_param=CATEGORY_AUCTIONS, max_items=1000)
+        items, stats = search_engine.ejecutar_motor_general("AUCTION", "endingSoonest", queries=QUERIES_AUCTIONS, category_params=CATEGORY_AUCTIONS, max_items=1000)
         hoy_str = datetime.now(TZ_CDMX).strftime("%Y-%m-%d")
 
         with SHEETS_LOCK:
