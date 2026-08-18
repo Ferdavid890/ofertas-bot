@@ -996,6 +996,24 @@ def iniciar_scheduler():
     # arranque_inicial() por separado, mas abajo, para no depender de esperar a
     # la proxima hora en punto o al proximo 00:05 CDMX.
     scheduler.add_job(sync_listings, IntervalTrigger(hours=1), id="sync_listings")
+    # Cierre de dia (agregado 17-ago-2026): la comparacion de sync_listings solo mira
+    # filas con fecha de HOY (CDMX) - un item que se vende/termina en la ultima hora del
+    # dia puede quedar "huerfano": la corrida horaria que lo detectaria cae ya del lado de
+    # "mañana" (fecha distinta), asi que nunca se marca Pendiente_Verificar ni Vendido, se
+    # queda pegado en Activo para siempre.
+    # 3 corridas extra (no 2) fijas a las 23:35/23:48/23:57 CDMX (antes de que reset_diario
+    # cambie el contexto a las 00:01) - se necesitan 3, no 2, para que el periodo de gracia
+    # (2 faltas SEGUIDAS para confirmar Vendido) alcance a completarse el mismo dia: con
+    # solo 2 corridas, un item que se vende ENTRE ellas solo llega a la 1ra falta antes de
+    # medianoche y queda a medias (Pendiente_Verificar huerfano, ya no Activo por error pero
+    # tampoco Vendido confirmado). Con 3 corridas espaciadas ~13min, cualquier item que deje
+    # de estar activo hasta ~23:57 alcanza a tener sus 2 faltas confirmadas el mismo dia. El
+    # hueco residual real queda acotado a los ultimos ~3 minutos antes de medianoche (vs.
+    # hasta 1 hora completa antes de este fix) - margen de error minimo, aceptado con el
+    # usuario.
+    scheduler.add_job(sync_listings, CronTrigger(hour=5, minute=35, timezone=timezone.utc), id="sync_listings_cierre_1")
+    scheduler.add_job(sync_listings, CronTrigger(hour=5, minute=48, timezone=timezone.utc), id="sync_listings_cierre_2")
+    scheduler.add_job(sync_listings, CronTrigger(hour=5, minute=57, timezone=timezone.utc), id="sync_listings_cierre_3")
     scheduler.add_job(sync_auctions, CronTrigger(hour=6, minute=5, timezone=timezone.utc), id="sync_auctions")
     # verificar_ventas_pendientes: version scraping (bloqueada por eBay con 403 desde IP
     # de datacenter, confirmado 16-ago-2026) fue reemplazada por GetItem de la Trading
@@ -1004,7 +1022,8 @@ def iniciar_scheduler():
     scheduler.start()
     recuperar_snipers_pendientes()
     threading.Thread(target=arranque_inicial, daemon=True).start()
-    log.info("Scheduler iniciado: listings cada 1h, auctions detectadas 1 vez/dia (00:05 CDMX), "
+    log.info("Scheduler iniciado: listings cada 1h + 3 cierres (23:35/23:48/23:57 CDMX), "
+             "auctions detectadas 1 vez/dia (00:05 CDMX), "
              "snipers puntuales T-60s/T-2s/T-1s, verificacion de ventas via GetItem cada 20min.")
 
 
